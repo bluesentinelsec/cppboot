@@ -10,6 +10,7 @@ from cppboot.generate.build_wrappers import _build_bat, _makefile
 from cppboot.generate.cmake_files import (
     _benchmarks_cmake,
     _dependencies_cmake,
+    _package_config_cmake_in,
     _root_cmake,
     _sanitizers_cmake,
     _src_cmake,
@@ -141,6 +142,7 @@ def generate_project(options: ProjectOptions) -> GenerateResult:
     write("cmake/Dependencies.cmake", _dependencies_cmake(ctx))
     write("cmake/CompilerWarnings.cmake", _warnings_cmake())
     write("cmake/Sanitizers.cmake", _sanitizers_cmake())
+    write(f"cmake/{ctx.name}Config.cmake.in", _package_config_cmake_in(ctx))
     # Version API is generated from VERSION via configure_file (single source).
     if ctx.with_modules:
         write("cmake/version.cppm.in", _version_module_in(ctx))

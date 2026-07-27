@@ -91,6 +91,14 @@ project({ctx.name}
   LANGUAGES CXX
 )
 
+# True when this project is the top-level CMake project (not add_subdirectory /
+# FetchContent). Downstream consumers should not inherit app/tests/bench defaults.
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+  set({ctx.macro}_IS_TOP_LEVEL ON)
+else()
+  set({ctx.macro}_IS_TOP_LEVEL OFF)
+endif()
+
 # Exposed to version templates (configure_file @ONLY).
 set(PROJECT_NAMESPACE "{ctx.namespace}")
 set(PROJECT_VERSION_STRING "${{PROJECT_VERSION}}")
@@ -99,32 +107,38 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# Export a compilation database for clangd and other LSP tools.
-set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+# Top-level-only settings so embedding via add_subdirectory/FetchContent stays clean.
+if({ctx.macro}_IS_TOP_LEVEL)
+  # Export a compilation database for clangd and other LSP tools.
+  set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# Put binaries under build/<config>/bin (and libs under lib/) so an executable
-# named like a component directory (e.g. project "calc" + src/calc/) never
-# collides with a source/build subdirectory path.
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${{CMAKE_BINARY_DIR}}/bin)
-set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${{CMAKE_BINARY_DIR}}/lib)
-set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${{CMAKE_BINARY_DIR}}/lib)
+  # Put binaries under build/<config>/bin (and libs under lib/) so an executable
+  # named like a component directory (e.g. project "calc" + src/calc/) never
+  # collides with a source/build subdirectory path.
+  set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${{CMAKE_BINARY_DIR}}/bin)
+  set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${{CMAKE_BINARY_DIR}}/lib)
+  set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${{CMAKE_BINARY_DIR}}/lib)
 
-# Default to Debug when the user does not pass CMAKE_BUILD_TYPE (single-config).
-if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
-  set(CMAKE_BUILD_TYPE Debug CACHE STRING "Build type" FORCE)
+  # Default to Debug when the user does not pass CMAKE_BUILD_TYPE (single-config).
+  if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Debug CACHE STRING "Build type" FORCE)
+  endif()
 endif()
 
 list(APPEND CMAKE_MODULE_PATH "${{CMAKE_CURRENT_SOURCE_DIR}}/cmake")
 include(CompilerWarnings)
 include(Sanitizers)
 
-# Preferred third-party libraries (FetchContent). ON by default; turn off to skip.
-option({ctx.macro}_WITH_CLI11 "CLI argument parsing via CLI11" ON)
-option({ctx.macro}_WITH_JSON "JSON parsing via nlohmann/json" ON)
-option({ctx.macro}_WITH_SPDLOG "Console/file logging via spdlog" ON)
+# Preferred third-party libraries (FetchContent). On for top-level apps; off when
+# embedded so consumers do not pull CLI/JSON/logging unless they opt in.
+option({ctx.macro}_WITH_CLI11 "CLI argument parsing via CLI11" ${{{ctx.macro}_IS_TOP_LEVEL}})
+option({ctx.macro}_WITH_JSON "JSON parsing via nlohmann/json" ${{{ctx.macro}_IS_TOP_LEVEL}})
+option({ctx.macro}_WITH_SPDLOG "Console/file logging via spdlog" ${{{ctx.macro}_IS_TOP_LEVEL}})
 
-option({ctx.macro}_BUILD_TESTS "Build unit tests" ON)
-option({ctx.macro}_BUILD_BENCHMARKS "Build benchmarks" ON)
+# When embedded, skip app/tests/benchmarks unless the consumer opts in.
+option({ctx.macro}_BUILD_APP "Build the demo application executable" ${{{ctx.macro}_IS_TOP_LEVEL}})
+option({ctx.macro}_BUILD_TESTS "Build unit tests" ${{{ctx.macro}_IS_TOP_LEVEL}})
+option({ctx.macro}_BUILD_BENCHMARKS "Build benchmarks" ${{{ctx.macro}_IS_TOP_LEVEL}})
 # ASan + UBSan for project targets (intended for Linux GCC/Clang; see make sanitizer).
 option({ctx.macro}_ENABLE_SANITIZERS "Enable Address+UBSan on project targets" OFF)
 
@@ -137,7 +151,9 @@ endif()
 {modules_block}
 {version_generate}
 add_library(${{PROJECT_NAME}}_lib {lib_type})
+# Namespaced aliases for consumers (add_subdirectory / FetchContent / find_package).
 add_library(${{PROJECT_NAME}}::lib ALIAS ${{PROJECT_NAME}}_lib)
+add_library(${{PROJECT_NAME}}::{ctx.target} ALIAS ${{PROJECT_NAME}}_lib)
 
 set_target_properties(${{PROJECT_NAME}}_lib PROPERTIES
   OUTPUT_NAME {ctx.target}
@@ -149,16 +165,11 @@ set_target_properties(${{PROJECT_NAME}}_lib PROPERTIES
 {public_includes}
 cppboot_set_project_warnings(${{PROJECT_NAME}}_lib)
 
-# Preferred deps link PUBLIC so the app and tests inherit them with the library.
-if({ctx.macro}_WITH_CLI11)
-  target_link_libraries(${{PROJECT_NAME}}_lib PUBLIC CLI11::CLI11)
-endif()
-if({ctx.macro}_WITH_JSON)
-  target_link_libraries(${{PROJECT_NAME}}_lib PUBLIC nlohmann_json::nlohmann_json)
-endif()
-if({ctx.macro}_WITH_SPDLOG)
-  target_link_libraries(${{PROJECT_NAME}}_lib PUBLIC spdlog::spdlog)
-endif()
+# Preferred third-party deps are linked on the *app* (and optionally tests), not
+# the library. Static libraries propagate private deps into install(EXPORT);
+# keeping the library free of FetchContent targets makes find_package clean.
+# Add target_link_libraries(... PUBLIC/PRIVATE ...) in component CMakeLists when
+# library code needs these deps.
 
 add_subdirectory(src)
 
@@ -172,8 +183,8 @@ if({ctx.macro}_BUILD_BENCHMARKS)
 endif()
 
 # Keep a source-root compile_commands.json for clangd / VS Code IntelliSense.
-# The database is written into the build tree; re-link/copy on every build.
-if(CMAKE_EXPORT_COMPILE_COMMANDS)
+# Only when this project is top-level (do not rewrite a parent project's link).
+if({ctx.macro}_IS_TOP_LEVEL AND CMAKE_EXPORT_COMPILE_COMMANDS)
   if(WIN32)
     add_custom_target(cppboot_compile_commands ALL
       COMMAND ${{CMAKE_COMMAND}} -E copy_if_different
@@ -201,17 +212,21 @@ include(GNUInstallDirs)
 
 
 def _install_rules(ctx: _Context) -> str:
+    """Install targets + CMake package config for find_package consumers."""
     if ctx.with_modules:
-        return """\
+        targets_install = """\
 install(TARGETS ${PROJECT_NAME}_lib
   EXPORT ${PROJECT_NAME}Targets
   ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
   LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
   FILE_SET CXX_MODULES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/modules
+  INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
 )
 """
-    return f"""\
+        headers_install = ""
+    else:
+        targets_install = f"""\
 install(DIRECTORY include/
   DESTINATION ${{CMAKE_INSTALL_INCLUDEDIR}}
   FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h"
@@ -229,6 +244,45 @@ install(TARGETS ${{PROJECT_NAME}}_lib
   INCLUDES DESTINATION ${{CMAKE_INSTALL_INCLUDEDIR}}
 )
 """
+        headers_install = ""
+
+    return f"""\
+{headers_install}{targets_install}
+# CMake package config so consumers can find_package({ctx.name}).
+install(EXPORT ${{PROJECT_NAME}}Targets
+  FILE ${{PROJECT_NAME}}Targets.cmake
+  NAMESPACE ${{PROJECT_NAME}}::
+  DESTINATION ${{CMAKE_INSTALL_LIBDIR}}/cmake/${{PROJECT_NAME}}
+)
+
+include(CMakePackageConfigHelpers)
+configure_package_config_file(
+  "${{CMAKE_CURRENT_SOURCE_DIR}}/cmake/{ctx.name}Config.cmake.in"
+  "${{CMAKE_CURRENT_BINARY_DIR}}/{ctx.name}Config.cmake"
+  INSTALL_DESTINATION ${{CMAKE_INSTALL_LIBDIR}}/cmake/${{PROJECT_NAME}}
+)
+write_basic_package_version_file(
+  "${{CMAKE_CURRENT_BINARY_DIR}}/{ctx.name}ConfigVersion.cmake"
+  VERSION ${{PROJECT_VERSION}}
+  COMPATIBILITY SameMajorVersion
+)
+install(FILES
+  "${{CMAKE_CURRENT_BINARY_DIR}}/{ctx.name}Config.cmake"
+  "${{CMAKE_CURRENT_BINARY_DIR}}/{ctx.name}ConfigVersion.cmake"
+  DESTINATION ${{CMAKE_INSTALL_LIBDIR}}/cmake/${{PROJECT_NAME}}
+)
+"""
+
+
+def _package_config_cmake_in(ctx: _Context) -> str:
+    """Template for install-tree find_package support."""
+    return f"""\
+@PACKAGE_INIT@
+
+include("${{CMAKE_CURRENT_LIST_DIR}}/{ctx.name}Targets.cmake")
+
+check_required_components({ctx.name})
+"""
 
 
 def _dependencies_cmake(ctx: _Context) -> str:
@@ -244,7 +298,7 @@ set(NLOHMANN_JSON_TAG {NLOHMANN_JSON_TAG})
 set(SPDLOG_TAG {SPDLOG_TAG})
 
 # ---------------------------------------------------------------------------
-# Preferred application libraries (optional, ON by default — see root options)
+# Preferred application libraries (optional — defaults follow top-level vs embed)
 # ---------------------------------------------------------------------------
 
 if({macro}_WITH_CLI11)
@@ -294,39 +348,46 @@ if({macro}_WITH_SPDLOG)
 endif()
 
 # ---------------------------------------------------------------------------
-# Test / benchmark frameworks
+# Test / benchmark frameworks (only when those options are enabled)
 # ---------------------------------------------------------------------------
 
-# GoogleTest / GoogleMock
-set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
-set(BUILD_GMOCK ON CACHE BOOL "" FORCE)
-set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
+if({macro}_BUILD_TESTS)
+  # GoogleTest / GoogleMock
+  set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+  set(BUILD_GMOCK ON CACHE BOOL "" FORCE)
+  set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
 
-FetchContent_Declare(
-  googletest
-  GIT_REPOSITORY https://github.com/google/googletest.git
-  GIT_TAG        ${{GOOGLETEST_TAG}}
-  GIT_SHALLOW    TRUE
-)
+  FetchContent_Declare(
+    googletest
+    GIT_REPOSITORY https://github.com/google/googletest.git
+    GIT_TAG        ${{GOOGLETEST_TAG}}
+    GIT_SHALLOW    TRUE
+  )
+  FetchContent_MakeAvailable(googletest)
 
-# Google Benchmark
-set(BENCHMARK_ENABLE_TESTING OFF CACHE BOOL "" FORCE)
-set(BENCHMARK_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
-set(BENCHMARK_ENABLE_GTEST_TESTS OFF CACHE BOOL "" FORCE)
+  foreach(_cppboot_third_party IN ITEMS gtest gtest_main gmock gmock_main)
+    cppboot_mark_system_includes(${{_cppboot_third_party}})
+  endforeach()
+endif()
 
-FetchContent_Declare(
-  benchmark
-  GIT_REPOSITORY https://github.com/google/benchmark.git
-  GIT_TAG        ${{BENCHMARK_TAG}}
-  GIT_SHALLOW    TRUE
-)
+if({macro}_BUILD_BENCHMARKS)
+  # Google Benchmark
+  set(BENCHMARK_ENABLE_TESTING OFF CACHE BOOL "" FORCE)
+  set(BENCHMARK_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
+  set(BENCHMARK_ENABLE_GTEST_TESTS OFF CACHE BOOL "" FORCE)
 
-FetchContent_MakeAvailable(googletest benchmark)
+  FetchContent_Declare(
+    benchmark
+    GIT_REPOSITORY https://github.com/google/benchmark.git
+    GIT_TAG        ${{BENCHMARK_TAG}}
+    GIT_SHALLOW    TRUE
+  )
+  FetchContent_MakeAvailable(benchmark)
 
-# Suppress warnings from third-party headers when consumed by project TUs.
-foreach(_cppboot_third_party IN ITEMS gtest gtest_main gmock gmock_main benchmark benchmark_main)
-  cppboot_mark_system_includes(${{_cppboot_third_party}})
-endforeach()
+  foreach(_cppboot_third_party IN ITEMS benchmark benchmark_main)
+    cppboot_mark_system_includes(${{_cppboot_third_party}})
+  endforeach()
+endif()
 
 include(GoogleTest)
 """
@@ -408,11 +469,23 @@ add_subdirectory(version)
 #   add_subdirectory(parser)
 
 # Painfully obvious program entrypoint: src/main.cpp
-# Do not add other executables here without a strong reason.
-add_executable(${{PROJECT_NAME}}_app main.cpp)
-set_target_properties(${{PROJECT_NAME}}_app PROPERTIES OUTPUT_NAME {ctx.name})
-target_link_libraries(${{PROJECT_NAME}}_app PRIVATE ${{PROJECT_NAME}}_lib)
-cppboot_set_project_warnings(${{PROJECT_NAME}}_app)
+# Skipped when this project is consumed via add_subdirectory / FetchContent
+# unless {ctx.macro}_BUILD_APP=ON.
+if({ctx.macro}_BUILD_APP)
+  add_executable(${{PROJECT_NAME}}_app main.cpp)
+  set_target_properties(${{PROJECT_NAME}}_app PROPERTIES OUTPUT_NAME {ctx.name})
+  target_link_libraries(${{PROJECT_NAME}}_app PRIVATE ${{PROJECT_NAME}}_lib)
+  if({ctx.macro}_WITH_CLI11)
+    target_link_libraries(${{PROJECT_NAME}}_app PRIVATE CLI11::CLI11)
+  endif()
+  if({ctx.macro}_WITH_JSON)
+    target_link_libraries(${{PROJECT_NAME}}_app PRIVATE nlohmann_json::nlohmann_json)
+  endif()
+  if({ctx.macro}_WITH_SPDLOG)
+    target_link_libraries(${{PROJECT_NAME}}_app PRIVATE spdlog::spdlog)
+  endif()
+  cppboot_set_project_warnings(${{PROJECT_NAME}}_app)
+endif()
 """
 
 
