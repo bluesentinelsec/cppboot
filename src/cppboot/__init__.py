@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
+from cppboot._version import __version__
 from cppboot.generator import GenerateResult, ProjectOptions, generate_project
-
-__version__ = "0.1.0"
 
 __all__ = [
     "GenerateResult",

@@ -26,9 +26,7 @@ LICENSE_CHOICES = (
 DEFAULT_LICENSE = "apache-2.0"
 
 # Authoritative text sources (SPDX license-list-data).
-_SPDX_BASE = (
-    "https://raw.githubusercontent.com/spdx/license-list-data/main/text"
-)
+_SPDX_BASE = "https://raw.githubusercontent.com/spdx/license-list-data/main/text"
 
 _LICENSE_URLS: dict[str, str] = {
     "apache-2.0": f"{_SPDX_BASE}/Apache-2.0.txt",
@@ -185,7 +183,8 @@ def _download_text(url: str, timeout: float) -> str:
     try:
         context = ssl.create_default_context()
         with urllib.request.urlopen(request, timeout=timeout, context=context) as response:
-            return response.read().decode("utf-8")
+            raw = response.read()
+            return raw.decode("utf-8") if isinstance(raw, (bytes, bytearray)) else str(raw)
     except (urllib.error.URLError, TimeoutError, OSError) as first_error:
         logger.debug("urllib download failed for %s: %s", url, first_error)
 

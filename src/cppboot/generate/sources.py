@@ -143,10 +143,7 @@ def _version_test(ctx: _Context) -> str:
     if ctx.with_modules:
         includes = f"import {ctx.namespace}.version;\n\n#include <gtest/gtest.h>"
     else:
-        includes = (
-            f'#include "{ctx.namespace}/version.hpp"\n\n'
-            "#include <gtest/gtest.h>"
-        )
+        includes = f'#include "{ctx.namespace}/version.hpp"\n\n#include <gtest/gtest.h>'
     return f"""\
 /**
  * @file version_test.cpp
@@ -192,10 +189,7 @@ def _version_bench(ctx: _Context) -> str:
     if ctx.with_modules:
         includes = f"import {ctx.namespace}.version;\n\n#include <benchmark/benchmark.h>"
     else:
-        includes = (
-            f'#include "{ctx.namespace}/version.hpp"\n\n'
-            "#include <benchmark/benchmark.h>"
-        )
+        includes = f'#include "{ctx.namespace}/version.hpp"\n\n#include <benchmark/benchmark.h>'
     return f"""\
 /**
  * @file version_bench.cpp

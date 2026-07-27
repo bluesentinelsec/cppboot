@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cppboot"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Bootstrap a professional-grade C++ project environment"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -24,6 +24,7 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Topic :: Software Development :: Build Tools",
     "Topic :: Software Development :: Code Generators",
+    "Typing :: Typed",
 ]
 dependencies = []
 
@@ -31,6 +32,10 @@ dependencies = []
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
+    "ruff>=0.9.0",
+    "mypy>=1.8.0",
+    "build>=1.2.0",
+    "twine>=5.0.0",
 ]
 
 [project.scripts]
@@ -40,6 +45,10 @@ cppboot = "cppboot.cli:main"
 Homepage = "https://github.com/bluesentinelsec/cppboot"
 Repository = "https://github.com/bluesentinelsec/cppboot"
 Issues = "https://github.com/bluesentinelsec/cppboot/issues"
+Changelog = "https://github.com/bluesentinelsec/cppboot/blob/main/CHANGELOG.md"
+
+[tool.setuptools.dynamic]
+version = { attr = "cppboot._version.__version__" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -60,3 +69,40 @@ markers = [
 [tool.coverage.run]
 source = ["cppboot"]
 branch = true
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # bugbear
+    "UP",  # pyupgrade
+    "SIM", # simplify
+]
+ignore = [
+    "E501", # line length handled by formatter preference; templates are long
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["B011"]
+# Embedded Makefile/batch/CMake templates intentionally mix tabs and spaces.
+"src/cppboot/generate/**" = ["E101"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.mypy]
+python_version = "3.10"
+mypy_path = "src"
+packages = ["cppboot"]
+strict = true
+warn_unused_configs = true
+show_error_codes = true
+pretty = true

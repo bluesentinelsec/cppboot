@@ -53,9 +53,7 @@ def test_parser_opt_outs() -> None:
 
 
 def test_parser_opt_in_features() -> None:
-    args = build_parser().parse_args(
-        ["-n", "demo", "--with-modules", "--shared", "--github"]
-    )
+    args = build_parser().parse_args(["-n", "demo", "--with-modules", "--shared", "--github"])
     assert args.with_modules is True
     assert args.shared is True
     assert args.github is True
