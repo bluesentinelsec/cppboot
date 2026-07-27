@@ -47,14 +47,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Structure the project around C++20 modules instead of classic headers.",
     )
     parser.add_argument(
-        "--no-sample",
-        action="store_true",
-        help=(
-            "Skip the sample Calc library/tests/benchmarks. "
-            "Scaffold an empty component layout ready for real code."
-        ),
-    )
-    parser.add_argument(
         "--shared",
         action="store_true",
         help="Build the library as a shared library (default: static).",
@@ -90,6 +82,15 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Write cross-platform GitHub Actions CI (default: on). "
             "Use --no-github-actions to skip."
+        ),
+    )
+    parser.add_argument(
+        "--codespaces",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Write GitHub Codespaces / Dev Container config (default: on). "
+            "Use --no-codespaces to skip."
         ),
     )
     parser.add_argument(
@@ -150,11 +151,11 @@ def main(argv: list[str] | None = None) -> int:
         license_id=args.license,
         build_system=args.build_system,
         with_modules=args.with_modules,
-        with_sample=not args.no_sample,
         shared_library=args.shared,
         with_vim=args.vim,
         with_ctags=args.ctags,
         with_vscode=args.vscode,
+        with_codespaces=args.codespaces,
         create_github=args.github,
         with_github_actions=args.github_actions,
         verbose=args.verbose,
@@ -169,14 +170,17 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Created project at {result.project_dir}")
     print(f"  files: {len(result.files_written)}")
     print(f"  license source: {result.license_source}")
-    print(f"  git: {'yes' if result.git_initialized else 'no'}")
+    print(f"  formatted (make fmt): {'yes' if result.formatted else 'no'}")
+    print(f"  git initial commit: {'yes' if result.git_initialized else 'no'}")
     print(f"  vim: {'yes' if options.with_vim else 'no'}")
     print(f"  ctags: {'yes' if options.with_ctags else 'no'}")
     print(f"  vscode: {'yes' if options.with_vscode else 'no'}")
     print(f"  github-actions: {'yes' if options.with_github_actions else 'no'}")
+    print(f"  codespaces: {'yes' if options.with_codespaces else 'no'}")
     if options.create_github:
         print(f"  github remote: {'yes' if result.github_created else 'failed'}")
     print()
+    print("Scaffold is formatted and committed — ready for real work.")
     print("Next steps:")
     print(f"  cd {result.project_dir}")
     if options.with_vscode:

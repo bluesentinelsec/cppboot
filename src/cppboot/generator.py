@@ -36,11 +36,11 @@ class ProjectOptions:
     license_id: str = DEFAULT_LICENSE
     build_system: str = "cmake"
     with_modules: bool = False
-    with_sample: bool = True
     shared_library: bool = False
     with_vim: bool = True
     with_ctags: bool = True
     with_vscode: bool = True
+    with_codespaces: bool = True
     create_github: bool = False
     with_github_actions: bool = True
     verbose: bool = False
@@ -55,6 +55,7 @@ class GenerateResult:
     git_initialized: bool
     github_created: bool
     license_source: str
+    formatted: bool = False
 
 
 def generate_project(options: ProjectOptions) -> GenerateResult:
@@ -83,11 +84,11 @@ def generate_project(options: ProjectOptions) -> GenerateResult:
         project_dir=project_dir,
         license_id=license_id,
         with_modules=options.with_modules,
-        with_sample=options.with_sample,
         shared_library=options.shared_library,
         with_vim=options.with_vim,
         with_ctags=options.with_ctags,
         with_vscode=options.with_vscode,
+        with_codespaces=options.with_codespaces,
         with_github_actions=options.with_github_actions,
         year=str(_dt.date.today().year),
     )
@@ -98,11 +99,6 @@ def generate_project(options: ProjectOptions) -> GenerateResult:
             "compiler with module dependency scanning (Clang 16+, GCC 14+, or "
             "MSVC 17.4+). AppleClang often lacks CMake module scanning support."
         )
-    if not options.with_sample:
-        logger.info(
-            "sample code disabled (--no-sample): no Calc demo; empty component layout"
-        )
-
     written: list[Path] = []
 
     def write(relpath: str, content: str) -> None:
@@ -124,33 +120,27 @@ def generate_project(options: ProjectOptions) -> GenerateResult:
     write("Doxyfile", _doxyfile(ctx))
     write("cmake/Dependencies.cmake", _dependencies_cmake(ctx))
     write("cmake/CompilerWarnings.cmake", _warnings_cmake())
+    write("cmake/Sanitizers.cmake", _sanitizers_cmake())
 
-    # Library sources + single obvious entrypoint at src/main.cpp
+    # Default library surface: version API + thin CLI with --version.
     write("src/CMakeLists.txt", _src_cmake(ctx))
     write("src/main.cpp", _main_cpp(ctx))
-    if ctx.with_sample:
-        write("src/calc/CMakeLists.txt", _calc_src_cmake(ctx))
-        if ctx.with_modules:
-            write("src/calc/calc.cppm", _calc_module(ctx))
-        else:
-            write(f"include/{ctx.namespace}/calc.hpp", _calc_header(ctx))
-            write("src/calc/calc.cpp", _calc_source(ctx))
+    write("src/version/CMakeLists.txt", _version_src_cmake(ctx))
+    if ctx.with_modules:
+        write("src/version/version.cppm", _version_module(ctx))
     else:
-        # Keeps the static/shared library target valid before real components exist.
-        write("src/library_anchor.cpp", _library_anchor_cpp(ctx))
+        write(f"include/{ctx.namespace}/version.hpp", _version_header(ctx))
+        write("src/version/version.cpp", _version_source(ctx))
 
     # Tests
     write("tests/CMakeLists.txt", _tests_cmake(ctx))
-    if ctx.with_sample:
-        write("tests/calc/CMakeLists.txt", _calc_tests_cmake(ctx))
-        write("tests/calc/calc_test.cpp", _calc_test(ctx))
-        write("tests/calc/mock_calc_test.cpp", _mock_calc_test(ctx))
+    write("tests/version/CMakeLists.txt", _version_tests_cmake(ctx))
+    write("tests/version/version_test.cpp", _version_test(ctx))
 
     # Benchmarks
     write("benchmarks/CMakeLists.txt", _benchmarks_cmake(ctx))
-    if ctx.with_sample:
-        write("benchmarks/calc/CMakeLists.txt", _calc_bench_cmake(ctx))
-        write("benchmarks/calc/calc_bench.cpp", _calc_bench(ctx))
+    write("benchmarks/version/CMakeLists.txt", _version_bench_cmake(ctx))
+    write("benchmarks/version/version_bench.cpp", _version_bench(ctx))
 
     if ctx.with_vim:
         write(".vimrc", _vimrc(ctx))
@@ -159,17 +149,30 @@ def generate_project(options: ProjectOptions) -> GenerateResult:
         write(".ctags", _ctags_config())
         logger.info("wrote Universal Ctags config (.ctags); run: make tags")
 
-    if ctx.with_vscode:
+    # CMakePresets are shared by local VS Code and GitHub Codespaces.
+    if ctx.with_vscode or ctx.with_codespaces:
         write("CMakePresets.json", _cmake_presets(ctx))
+
+    if ctx.with_vscode:
         write(".vscode/extensions.json", _vscode_extensions())
         write(".vscode/settings.json", _vscode_settings(ctx))
         write(".vscode/tasks.json", _vscode_tasks(ctx))
         write(".vscode/launch.json", _vscode_launch(ctx))
         logger.info("wrote VS Code config under .vscode/ and CMakePresets.json")
 
+    if ctx.with_codespaces:
+        write(".devcontainer/devcontainer.json", _devcontainer_json(ctx))
+        write(".devcontainer/setup.sh", _devcontainer_setup_sh(ctx))
+        setup_sh = project_dir / ".devcontainer" / "setup.sh"
+        setup_sh.chmod(setup_sh.stat().st_mode | 0o111)
+        logger.info(
+            "wrote GitHub Codespaces / Dev Container config under .devcontainer/"
+        )
+
     if ctx.with_github_actions:
         write(".github/workflows/ci.yml", _github_actions_workflow(ctx))
-        logger.info("wrote GitHub Actions workflow at .github/workflows/ci.yml")
+        write(".github/workflows/sanitizers.yml", _github_actions_sanitizers_workflow(ctx))
+        logger.info("wrote GitHub Actions workflows under .github/workflows/")
 
     year = ctx.year
     holder = name
@@ -181,6 +184,8 @@ def generate_project(options: ProjectOptions) -> GenerateResult:
         license_result.source,
     )
 
+    # Format before the initial commit so the tree is in a predictable state.
+    formatted = _run_make_fmt(project_dir)
     git_ok = _git_init(project_dir)
     github_ok = False
     if options.create_github:
@@ -192,6 +197,7 @@ def generate_project(options: ProjectOptions) -> GenerateResult:
         git_initialized=git_ok,
         github_created=github_ok,
         license_source=license_result.source,
+        formatted=formatted,
     )
 
 
@@ -204,16 +210,46 @@ class _Context:
     project_dir: Path
     license_id: str
     with_modules: bool
-    with_sample: bool
     shared_library: bool
     with_vim: bool
     with_ctags: bool
     with_vscode: bool
+    with_codespaces: bool
     with_github_actions: bool
     year: str
 
 
+def _run_make_fmt(project_dir: Path) -> bool:
+    """Run ``make fmt`` so generated sources match .clang-format."""
+    make = shutil.which("make")
+    if make is None:
+        logger.warning("make not found; skipped source formatting")
+        return False
+    if shutil.which("clang-format") is None:
+        logger.warning("clang-format not found; skipped source formatting")
+        return False
+    try:
+        completed = subprocess.run(
+            [make, "fmt"],
+            cwd=project_dir,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        if completed.stdout.strip():
+            logger.debug("make fmt: %s", completed.stdout.strip())
+        logger.info("formatted sources with make fmt")
+        return True
+    except subprocess.CalledProcessError as exc:
+        logger.warning(
+            "make fmt failed (continuing with unformatted sources): %s",
+            (exc.stderr or exc.stdout or str(exc)).strip(),
+        )
+        return False
+
+
 def _git_init(project_dir: Path) -> bool:
+    """Initialize git and create a single initial commit of the scaffold."""
     git = shutil.which("git")
     if git is None:
         logger.warning("git not found; skipped git init")
@@ -233,6 +269,17 @@ def _git_init(project_dir: Path) -> bool:
             capture_output=True,
             text=True,
         )
+        # Avoid empty commits if nothing is staged (should not happen).
+        status = subprocess.run(
+            [git, "status", "--porcelain"],
+            cwd=project_dir,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        if not status.stdout.strip():
+            logger.warning("git: nothing to commit after scaffold")
+            return True
         subprocess.run(
             [
                 git,
@@ -249,7 +296,10 @@ def _git_init(project_dir: Path) -> bool:
             capture_output=True,
             text=True,
         )
-        logger.info("initialized git repository in %s", project_dir)
+        logger.info(
+            "initialized git repository with initial commit in %s",
+            project_dir,
+        )
         return True
     except subprocess.CalledProcessError as exc:
         logger.warning("git init failed: %s", exc.stderr or exc)
@@ -343,6 +393,7 @@ endif()
 
 list(APPEND CMAKE_MODULE_PATH "${{CMAKE_CURRENT_SOURCE_DIR}}/cmake")
 include(CompilerWarnings)
+include(Sanitizers)
 
 # Preferred third-party libraries (FetchContent). ON by default; turn off to skip.
 option({ctx.macro}_WITH_CLI11 "CLI argument parsing via CLI11" ON)
@@ -351,8 +402,15 @@ option({ctx.macro}_WITH_SPDLOG "Console/file logging via spdlog" ON)
 
 option({ctx.macro}_BUILD_TESTS "Build unit tests" ON)
 option({ctx.macro}_BUILD_BENCHMARKS "Build benchmarks" ON)
+# ASan + UBSan for project targets (intended for Linux GCC/Clang; see make sanitizer).
+option({ctx.macro}_ENABLE_SANITIZERS "Enable Address+UBSan on project targets" OFF)
 
 include(Dependencies)
+
+# Apply sanitizer flags only to targets created after this point (not FetchContent deps).
+if({ctx.macro}_ENABLE_SANITIZERS)
+  cppboot_enable_sanitizers()
+endif()
 {modules_block}
 add_library(${{PROJECT_NAME}}_lib {lib_type})
 add_library(${{PROJECT_NAME}}::lib ALIAS ${{PROJECT_NAME}}_lib)
@@ -385,6 +443,30 @@ endif()
 
 if({ctx.macro}_BUILD_BENCHMARKS)
   add_subdirectory(benchmarks)
+endif()
+
+# Keep a source-root compile_commands.json for clangd / VS Code IntelliSense.
+# The database is written into the build tree; re-link/copy on every build.
+if(CMAKE_EXPORT_COMPILE_COMMANDS)
+  if(WIN32)
+    add_custom_target(cppboot_compile_commands ALL
+      COMMAND ${{CMAKE_COMMAND}} -E copy_if_different
+        "${{CMAKE_BINARY_DIR}}/compile_commands.json"
+        "${{CMAKE_SOURCE_DIR}}/compile_commands.json"
+      COMMENT "Copying compile_commands.json to source root for clangd"
+      VERBATIM
+    )
+  else()
+    add_custom_target(cppboot_compile_commands ALL
+      COMMAND ${{CMAKE_COMMAND}} -E rm -f
+        "${{CMAKE_SOURCE_DIR}}/compile_commands.json"
+      COMMAND ${{CMAKE_COMMAND}} -E create_symlink
+        "${{CMAKE_BINARY_DIR}}/compile_commands.json"
+        "${{CMAKE_SOURCE_DIR}}/compile_commands.json"
+      COMMENT "Linking compile_commands.json to source root for clangd"
+      VERBATIM
+    )
+  endif()
 endif()
 
 include(GNUInstallDirs)
@@ -556,130 +638,145 @@ endfunction()
 """
 
 
+def _sanitizers_cmake() -> str:
+    return """\
+# AddressSanitizer + UndefinedBehaviorSanitizer (GCC/Clang).
+# Enable with -D<PROJECT>_ENABLE_SANITIZERS=ON (see `make sanitizer`).
+# Intended primary platform: Linux. macOS is best-effort; MSVC is not supported here.
+function(cppboot_enable_sanitizers)
+  if(MSVC)
+    message(FATAL_ERROR
+      "Sanitizers via cppboot_enable_sanitizers() require GCC or Clang "
+      "(not MSVC). Use Linux CI or a Clang toolset.")
+  endif()
+  if(NOT CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
+    message(FATAL_ERROR
+      "Sanitizers require GNU or Clang (got ${CMAKE_CXX_COMPILER_ID}).")
+  endif()
+
+  message(STATUS "Enabling AddressSanitizer + UndefinedBehaviorSanitizer on project targets")
+  add_compile_options(
+    -fsanitize=address,undefined
+    -fno-omit-frame-pointer
+    -fno-sanitize-recover=all
+    -g
+  )
+  add_link_options(
+    -fsanitize=address,undefined
+  )
+endfunction()
+"""
+
+
 def _src_cmake(ctx: _Context) -> str:
-    if ctx.with_sample:
-        library_bits = "add_subdirectory(calc)\n"
-    else:
-        library_bits = (
-            "# Example once you add code:\n"
-            "#   add_subdirectory(parser)\n"
-            "#\n"
-            "# Until then, library_anchor.cpp keeps the library target non-empty. "
-            "Remove that\n"
-            "# file and the target_sources line below when your first real "
-            "component lands.\n"
-            "target_sources(${PROJECT_NAME}_lib PRIVATE library_anchor.cpp)\n"
-        )
+    return f"""\
+# Library implementation components.
+# Each logical subdirectory owns a CMakeLists.txt that lists sources explicitly.
+add_subdirectory(version)
+# Example for new code:
+#   add_subdirectory(parser)
 
-    return (
-        "# Library implementation components.\n"
-        "# Each logical subdirectory owns a CMakeLists.txt that lists sources "
-        "explicitly.\n"
-        f"{library_bits}\n"
-        "# Painfully obvious program entrypoint: src/main.cpp\n"
-        "# Do not add other executables here without a strong reason.\n"
-        "add_executable(${PROJECT_NAME}_app main.cpp)\n"
-        f"set_target_properties(${{PROJECT_NAME}}_app PROPERTIES "
-        f"OUTPUT_NAME {ctx.name})\n"
-        "target_link_libraries(${PROJECT_NAME}_app PRIVATE ${PROJECT_NAME}_lib)\n"
-        "cppboot_set_project_warnings(${PROJECT_NAME}_app)\n"
-    )
+# Painfully obvious program entrypoint: src/main.cpp
+# Do not add other executables here without a strong reason.
+add_executable(${{PROJECT_NAME}}_app main.cpp)
+set_target_properties(${{PROJECT_NAME}}_app PROPERTIES OUTPUT_NAME {ctx.name})
+target_link_libraries(${{PROJECT_NAME}}_app PRIVATE ${{PROJECT_NAME}}_lib)
+cppboot_set_project_warnings(${{PROJECT_NAME}}_app)
+"""
 
 
-def _calc_src_cmake(ctx: _Context) -> str:
+def _version_src_cmake(ctx: _Context) -> str:
     if ctx.with_modules:
         return f"""\
-# calc component (C++20 module).
-# List every module unit and implementation file explicitly.
+# version component (C++20 module) — package version API.
 target_sources(${{PROJECT_NAME}}_lib
   PUBLIC
     FILE_SET CXX_MODULES FILES
-      calc.cppm
+      version.cppm
 )
 """
     return f"""\
-# calc component.
+# version component — package version API (keep in sync with project VERSION).
 # List every translation unit explicitly — do not use file(GLOB).
 target_sources(${{PROJECT_NAME}}_lib
   PRIVATE
-    calc.cpp
+    version.cpp
 )
 """
 
 
 def _tests_cmake(ctx: _Context) -> str:
-    if ctx.with_sample:
-        return """\
-# Unit tests — one subdirectory per component under test.
-add_subdirectory(calc)
-"""
+    _ = ctx
     return """\
 # Unit tests — one subdirectory per component under test.
-# Example: add_subdirectory(parser)
+add_subdirectory(version)
 """
 
 
-def _calc_tests_cmake(ctx: _Context) -> str:
+def _version_tests_cmake(ctx: _Context) -> str:
     return f"""\
-add_executable({ctx.target}_calc_test
-  calc_test.cpp
-  mock_calc_test.cpp
+add_executable({ctx.target}_version_test
+  version_test.cpp
 )
-target_link_libraries({ctx.target}_calc_test
+target_link_libraries({ctx.target}_version_test
   PRIVATE
     ${{PROJECT_NAME}}_lib
     GTest::gtest_main
-    GTest::gmock
 )
-cppboot_set_project_warnings({ctx.target}_calc_test)
-gtest_discover_tests({ctx.target}_calc_test)
+cppboot_set_project_warnings({ctx.target}_version_test)
+gtest_discover_tests({ctx.target}_version_test)
 """
 
 
 def _benchmarks_cmake(ctx: _Context) -> str:
-    if ctx.with_sample:
-        return """\
-# Microbenchmarks — one subdirectory per component.
-add_subdirectory(calc)
-"""
+    _ = ctx
     return """\
 # Microbenchmarks — one subdirectory per component.
-# Example: add_subdirectory(parser)
+add_subdirectory(version)
 """
 
 
-def _calc_bench_cmake(ctx: _Context) -> str:
+def _version_bench_cmake(ctx: _Context) -> str:
     return f"""\
-add_executable({ctx.target}_calc_bench
-  calc_bench.cpp
+add_executable({ctx.target}_version_bench
+  version_bench.cpp
 )
-target_link_libraries({ctx.target}_calc_bench
+target_link_libraries({ctx.target}_version_bench
   PRIVATE
     ${{PROJECT_NAME}}_lib
     benchmark::benchmark
     benchmark::benchmark_main
 )
-cppboot_set_project_warnings({ctx.target}_calc_bench)
+cppboot_set_project_warnings({ctx.target}_version_bench)
 """
 
 
 def _makefile(ctx: _Context) -> str:
     target = ctx.target
-    # C++20 modules require Ninja or VS generators; default to Ninja when modules are on.
+    # Keep Makefile and CMakePresets/VS Code aligned: prefer Ninja when available.
+    # Mixing Unix Makefiles (plain `cmake -B build/debug`) with presets that force
+    # Ninja causes "generator does not match" errors on F5.
     if ctx.with_modules:
         generator_default = """
 # C++20 modules require Ninja (or Visual Studio). Prefer Ninja by default.
+# Must match CMakePresets.json so `make` and VS Code F5 share the same build tree.
 ifeq ($(GENERATOR),)
   ifneq ($(shell command -v ninja 2>/dev/null),)
     GENERATOR := Ninja
   else
-    $(warning C++20 modules need the Ninja generator; install ninja or set GENERATOR=)
+    $(warning C++20 modules need Ninja; install ninja or set GENERATOR=)
   endif
 endif
 """
     else:
         generator_default = """
-# Optional: export GENERATOR=Ninja to use the Ninja CMake generator.
+# Prefer Ninja when available so `make` matches CMakePresets.json / VS Code.
+# Override with: make GENERATOR="Unix Makefiles"   or install ninja (brew/apt).
+ifeq ($(GENERATOR),)
+  ifneq ($(shell command -v ninja 2>/dev/null),)
+    GENERATOR := Ninja
+  endif
+endif
 """
     if ctx.with_ctags:
         phony_extra = " tags"
@@ -703,13 +800,15 @@ tags:
 # Idiomatic GNU Make wrapper around the CMake build.
 # Prefer these targets for day-to-day work.
 
-.PHONY: all debug release test bench fmt doc clean configure-debug configure-release \\
-        link_compile_commands copy_compile_commands help{phony_extra}
+.PHONY: all debug release test bench sanitizer fmt doc clean reconfigure-debug reconfigure-release \\
+        configure-debug configure-release link_compile_commands copy_compile_commands help{phony_extra}
 
 PROJECT_NAME := {ctx.name}
+PROJECT_MACRO := {ctx.macro}
 TARGET_NAME  := {target}
 BUILD_DEBUG  := build/debug
 BUILD_RELEASE := build/release
+BUILD_SANITIZER := build/sanitizer
 GENERATOR    ?=
 CMAKE_FLAGS  ?=
 {generator_default}
@@ -731,9 +830,20 @@ help:
 	@echo "  make release       - configure & build Release (optimized, stripped)"
 	@echo "  make test          - run unit tests (Debug)"
 	@echo "  make bench         - run microbenchmarks (Release preferred)"
+	@echo "  make sanitizer     - ASan+UBSan build + ctest (Linux/Clang/GCC)"
 	@echo "  make fmt           - run clang-format on all sources"
 	@echo "  make doc           - generate Doxygen HTML under docs/html"
-{help_tags}	@echo "  make clean         - remove local build trees and compile_commands.json"
+{help_tags}	@echo "  make reconfigure-debug  - wipe build/debug and reconfigure (fixes generator mismatches)"
+	@echo "  make clean         - remove local build trees and compile_commands.json"
+
+# Wipe a build tree when the generator changes (e.g. Makefiles vs Ninja / VS Code).
+reconfigure-debug:
+	rm -rf $(BUILD_DEBUG)
+	$(MAKE) configure-debug
+
+reconfigure-release:
+	rm -rf $(BUILD_RELEASE)
+	$(MAKE) configure-release
 
 configure-debug:
 	cmake -S . -B $(BUILD_DEBUG) $(CMAKE_GENERATOR_FLAG) \\
@@ -750,18 +860,20 @@ configure-release:
 
 debug: configure-debug
 	cmake --build $(BUILD_DEBUG) --parallel
+	@# Convenience symlink so ./$(PROJECT_NAME) works from the project root.
+	ln -sfn $(BUILD_DEBUG)/bin/$(PROJECT_NAME)$(EXE_EXT) $(PROJECT_NAME)$(EXE_EXT)
 
 release: configure-release
 	cmake --build $(BUILD_RELEASE) --parallel
 	-@find $(BUILD_RELEASE)/bin -type f -name '*$(EXE_EXT)' 2>/dev/null \\
 	  -exec strip -S {{}} + 2>/dev/null || true
+	ln -sfn $(BUILD_RELEASE)/bin/$(PROJECT_NAME)$(EXE_EXT) $(PROJECT_NAME)$(EXE_EXT)
 
 test: debug
 	ctest --test-dir $(BUILD_DEBUG) --output-on-failure --parallel
 
-# Runs the first Google Benchmark binary found under the Release build tree.
-# With the sample scaffold that is typically <name>_calc_bench; with your own
-# components any *bench* executable works the same way.
+# Runs the first Google Benchmark binary found under the Release build tree
+# (e.g. <name>_version_bench). Missing benches exit successfully.
 bench: release
 	@found=$$(find $(BUILD_RELEASE)/bin $(BUILD_RELEASE) -type f \\( -name '*bench$(EXE_EXT)' -o -name '*_bench$(EXE_EXT)' \\) 2>/dev/null | head -n 1); \\
 	if [ -z "$$found" ]; then \\
@@ -770,6 +882,30 @@ bench: release
 	fi; \\
 	echo "Running $$found"; \\
 	"$$found" --benchmark_min_time=0.01s
+
+# AddressSanitizer + UndefinedBehaviorSanitizer (project targets only).
+# Primary platform: Linux. Failures abort so CI/jobs exit non-zero.
+# Leak detection is Linux-only (ASan aborts on macOS if detect_leaks=1).
+sanitizer:
+ifeq ($(OS),Windows_NT)
+	@echo "make sanitizer is intended for Linux (GCC/Clang), not Windows."; exit 1
+endif
+	@if [ "$$(uname -s 2>/dev/null)" = "Darwin" ]; then \\
+	  echo "note: sanitizers are validated on Linux CI; macOS is best-effort (no LSan)"; \\
+	fi
+	cmake -S . -B $(BUILD_SANITIZER) $(CMAKE_GENERATOR_FLAG) \\
+	  -DCMAKE_BUILD_TYPE=Debug \\
+	  -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \\
+	  -D$(PROJECT_MACRO)_ENABLE_SANITIZERS=ON \\
+	  $(CMAKE_FLAGS)
+	cmake --build $(BUILD_SANITIZER) --parallel
+	@if [ "$$(uname -s 2>/dev/null)" = "Linux" ]; then \\
+	  export ASAN_OPTIONS=halt_on_error=1:abort_on_error=1:detect_leaks=1:detect_stack_use_after_return=1; \\
+	else \\
+	  export ASAN_OPTIONS=halt_on_error=1:abort_on_error=1:detect_leaks=0; \\
+	fi; \\
+	export UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1; \\
+	ctest --test-dir $(BUILD_SANITIZER) --output-on-failure --parallel
 
 fmt:
 	@command -v clang-format >/dev/null 2>&1 || {{ echo "clang-format not found"; exit 1; }}
@@ -783,7 +919,7 @@ doc:
 	doxygen Doxyfile
 {tags_target}
 clean:
-	rm -rf build docs/html docs/latex docs/xml compile_commands.json{clean_extra}
+	rm -rf build docs/html docs/latex docs/xml compile_commands.json $(PROJECT_NAME)$(EXE_EXT){clean_extra}
 
 link_compile_commands:
 	@if [ -f "$(BUILD_DIR)/compile_commands.json" ]; then \\
@@ -829,11 +965,9 @@ def _readme(ctx: _Context) -> str:
         else ""
     )
     sample_note = (
-        "\nThis tree includes a small **Calc** sample component (library, tests, "
-        "mock, benchmark) so the toolchain is immediately exercisable.\n"
-        if ctx.with_sample
-        else "\nScaffolded with **`--no-sample`**: no Calc demo. Add your first "
-        "component under `src/<name>/` (and drop `library_anchor.cpp` when you do).\n"
+        "\nDefault library surface is the **version** component (`0.1.0`) with "
+        "CLI `--version` / `-V`, unit tests, and a small benchmark. Add real "
+        "features as new components under `src/<component>/`.\n"
     )
     gha_section = ""
     if ctx.with_github_actions:
@@ -841,21 +975,71 @@ def _readme(ctx: _Context) -> str:
 
 ## Continuous integration
 
-A GitHub Actions workflow is checked in at `.github/workflows/ci.yml`
-(default; disable with `cppboot --no-github-actions`). On every push and pull
-request it runs a matrix across **Ubuntu**, **macOS**, and **Windows**, for each
-OS:
+GitHub Actions workflows (default; disable with `cppboot --no-github-actions`):
+
+| Workflow | File | Purpose |
+|----------|------|---------|
+| **CI** | `.github/workflows/ci.yml` | Ubuntu/macOS/Windows × Debug+Release, tests, benches, artifacts |
+| **Sanitizers** | `.github/workflows/sanitizers.yml` | Linux ASan+UBSan build + `ctest` (failures fail the job) |
+
+**CI** (each OS):
 
 1. Configure and build **Debug** (Ninja)
 2. Run unit tests (CTest) on Debug
 3. Configure and build **Release**
 4. Run unit tests on Release
-5. Run Google Benchmark binaries found under `build/release` (short min time)
-6. Upload `build/*/bin` artifacts for that OS
+5. Run Google Benchmark binaries under `build/release` (short min time)
+6. Package and upload zip artifacts via `actions/upload-artifact` for **Debug**
+   and **Release** on each OS
 
-The workflow uses CMake + Ninja directly (not the Makefile) so Windows runners
-behave like Unix. First runs download FetchContent dependencies and may take a
-few minutes.
+Artifact archive name shape:
+
+```text
+<app>-<os>-<cpu-arch>-<debug|release>-<version>.zip
+```
+
+Examples: `myproj-linux-x86_64-debug-0.1.0.zip`,
+`myproj-macos-arm64-release-0.1.0.zip`,
+`myproj-windows-x86_64-release-0.1.0.zip`.
+
+Each zip contains the contents of `build/<config>/bin/` (app, tests, benches).
+Version is read from `./<app> --version` when available (default `0.1.0`).
+
+**Sanitizers** (Ubuntu + Clang): configure with
+`-{ctx.macro}_ENABLE_SANITIZERS=ON`, build, run tests with
+`ASAN_OPTIONS` / `UBSAN_OPTIONS` set so findings abort (non-zero exit).
+
+Locally on Linux: `make sanitizer` (same flags and env).
+
+Action pins use current stable majors (`actions/checkout@v7`,
+`actions/upload-artifact@v7`, `lukka/get-cmake@latest` with latest CMake/Ninja).
+"""
+    codespaces_section = ""
+    if ctx.with_codespaces:
+        codespaces_section = f"""
+
+## GitHub Codespaces (VS Code in the browser)
+
+This repo includes a **Dev Container** (`.devcontainer/`) for
+[GitHub Codespaces](https://github.com/features/codespaces) and local
+VS Code Dev Containers.
+
+### Open in Codespaces
+
+1. Push the repo to GitHub (or use an existing remote).
+2. On GitHub: **Code → Codespaces → Create codespace on &lt;branch&gt;**.
+3. Wait for the container create hooks:
+   - `onCreateCommand`: install Ninja, clang-format, Doxygen, ctags
+   - `postCreateCommand`: `cmake --preset debug` + Debug build (FetchContent)
+4. In the browser VS Code: **F5** (*Debug {ctx.name}*), Testing view, or terminal
+   `make test` / `./build/debug/bin/{ctx.name} --version`.
+
+### Local Dev Container
+
+In desktop VS Code with the Dev Containers extension:
+**Dev Containers: Reopen in Container**.
+
+Disable with `cppboot --no-codespaces` when regenerating a project.
 """
     vscode_section = ""
     if ctx.with_vscode:
@@ -864,15 +1048,39 @@ few minutes.
 ## Open in VS Code
 
 1. Open this folder in VS Code (`code .`).
-2. Install the **recommended extensions** when prompted (clangd, CMake Tools, CodeLLDB).
-3. **CMake: Select Configure Preset** → `debug` (or use the CMake status bar).
-4. **Build:** `Ctrl/Cmd+Shift+B` (task *Build Debug*) or CMake Tools Build.
-5. **Debug the app:** F5 → *Debug {ctx.name}* (builds Debug first).
-6. **Tests:** Task *Test* / CMake Tools CTest, or `make test` in the terminal.
+2. Install the **recommended extensions** when prompted
+   (clangd, CMake Tools, CodeLLDB, **C++ TestMate**).
+3. Install **Ninja** (`brew install ninja` / `apt install ninja-build`). VS Code
+   presets and `make` both prefer Ninja so they share the same `build/debug` tree.
+4. **Build once:** `Ctrl/Cmd+Shift+B` (*Build Debug*). This configures CMake,
+   builds, and places `compile_commands.json` at the repo root for **clangd**.
+5. If red squiggles remain: Command Palette → **clangd: Restart language server**
+   (or reload the window). IntelliSense needs that compilation database.
+6. **Debug the app:** F5 → *Debug {ctx.name}* (rebuilds Debug first).
+7. **Unit tests (per-test ▶):** open the **Testing** view (beaker icon).
+   After a Debug build, **C++ TestMate** discovers GoogleTest binaries under
+   `build/debug/bin/` and offers run/debug for suites and individual `TEST`s.
+8. **Bulk tests:** Task *Test*, CMake Tools CTest, or `make test`.
 
 Presets live in `CMakePresets.json` (`debug` → `build/debug`, `release` → `build/release`).
-clangd uses the root `compile_commands.json` after the first configure (also
-copied by CMake Tools via workspace settings).
+
+**Generator mismatch:** If you see *generator : Ninja Does not match ... Unix Makefiles*,
+the build tree was configured with a different generator. Fix with:
+
+```bash
+make reconfigure-debug
+# or: rm -rf build/debug && cmake --preset debug
+```
+
+Then F5 again. Prefer always using Ninja (install it; both `make` and VS Code will use it).
+
+**IntelliSense note:** Disable Microsoft C/C++ IntelliSense (already set) and use
+**clangd** only. Do not enable both. `std::string` / CLI11 / project headers resolve
+from `compile_commands.json` after the first successful configure+build.
+
+**Tests note:** TestMate needs built test executables — Build Debug first.
+Individual test debug uses CodeLLDB (`lldb`) on macOS/Linux; on Windows you may
+set `testMate.cpp.debug.configTemplate.type` to `cppvsdbg`.
 
 Windows: use the *Debug {ctx.name} (Windows)* launch config (MSVC debugger).
 """
@@ -891,7 +1099,7 @@ the build, test, and source-onboarding workflows — not product requirements.
 - **Ninja** is required when this project uses C++20 modules (`--with-modules`)
 - Optional tools: `clang-format`, `doxygen`, an LSP client with clangd
 - Network access on first configure (CMake **FetchContent** downloads pinned deps)
-{gha_section}{vscode_section}
+{gha_section}{codespaces_section}{vscode_section}
 ## Preferred third-party libraries
 
 These are **imported by default** via FetchContent (see `cmake/Dependencies.cmake`)
@@ -967,16 +1175,17 @@ cmake -S . -B build/debug -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMAN
 cmake --build build/debug
 ```
 
-## Run the sample app
+## Run the app
 
 The program entrypoint is always **`src/main.cpp`**.
-Built executables land under **`build/<config>/bin/`** (never beside component
-folders, so a project named like a component cannot collide).
+`make` links **`./{ctx.name}`** at the project root to `build/debug/bin/{ctx.name}`.
 
 After `make debug`:
 
 ```bash
-./build/debug/bin/{ctx.name}
+./{ctx.name}
+./{ctx.name} --version
+./{ctx.name} -V
 ```
 
 ## Tests
@@ -985,7 +1194,7 @@ After `make debug`:
 make test
 ```
 
-Runs CTest against the Debug build. Tests use **GoogleTest** and **GoogleMock**.
+Runs CTest against the Debug build (includes version API tests).
 
 ## Benchmarks
 
@@ -1065,7 +1274,7 @@ own `CMakeLists.txt` and **lists files explicitly** (no `file(GLOB)`).
 4. **Register the component** in `src/CMakeLists.txt`:
 
    ```cmake
-   add_subdirectory(calc)
+   add_subdirectory(version)
    add_subdirectory(parser)
    ```
 
@@ -1159,6 +1368,7 @@ Prefer the Makefile wrappers:
 | Release build | `make release` |
 | Unit tests | `make test` |
 | Benchmarks | `make bench` |
+| ASan+UBSan (Linux) | `make sanitizer` |
 | Format | `make fmt` |
 | API docs | `make doc` |
 | ctags index | `make tags` (if enabled) |
@@ -1171,6 +1381,12 @@ Prefer the Makefile wrappers:
   (Universal Ctags recommended).
 - If present, `.github/workflows/ci.yml` is the multi-OS CI contract (Debug +
   Release, tests, benchmarks on Linux/macOS/Windows). Keep it green.
+- If present, `.github/workflows/sanitizers.yml` runs ASan+UBSan on Linux;
+  treat sanitizer failures as bugs. Locally: `make sanitizer`.
+- If present, `.devcontainer/` enables **GitHub Codespaces** / Dev Containers
+  (browser or local VS Code in a C++ toolchain container).
+- Default library API includes **`Version()`** (semver string, default `0.1.0`)
+  and the app exposes **`--version` / `-V`** via CLI11.
 - Mechanical formatting is enforced by **clang-format** via the checked-in
   `.clang-format` (**Microsoft** style). Run `make fmt`.
 - **Logic, naming, API design, and code organization** follow the
@@ -1252,6 +1468,29 @@ helpers):
   line, no TODOs that only make sense during an unfinished edit, no
   change-log commentary that belongs in version control.
 
+### Tests and benchmarks under warnings-as-errors
+
+- Project flags apply to **your** TUs (lib, app, tests, benchmarks), not only
+  production code.
+- For `[[nodiscard]]` APIs with GoogleTest throws, bind the result:
+
+  ```cpp
+  EXPECT_THROW(
+      {{
+        auto value = ApiThatIsNodiscard();
+        static_cast<void>(value);
+      }},
+      std::runtime_error);
+  ```
+
+- For Google Benchmark, pass a **mutable lvalue** to `DoNotOptimize` (const-ref
+  overloads are deprecated and fail `-Werror`):
+
+  ```cpp
+  auto value = Compute();
+  benchmark::DoNotOptimize(value);
+  ```
+
 ### What to avoid
 
 - Drive-by refactors unrelated to the task.
@@ -1276,6 +1515,108 @@ helpers):
 
 `AGENTS.md` is about **how to work in this repository**. Product requirements
 and design docs for the application itself belong elsewhere.
+"""
+
+
+def _devcontainer_json(ctx: _Context) -> str:
+    """GitHub Codespaces / VS Code Dev Containers configuration."""
+    return f"""\
+{{
+  "name": "{ctx.name}",
+  "image": "mcr.microsoft.com/devcontainers/cpp:1-ubuntu-24.04",
+  "features": {{
+    "ghcr.io/devcontainers/features/github-cli:1": {{}}
+  }},
+  "containerEnv": {{
+    "CMAKE_GENERATOR": "Ninja",
+    "CMAKE_BUILD_PARALLEL_LEVEL": "4"
+  }},
+  "customizations": {{
+    "vscode": {{
+      "extensions": [
+        "llvm-vs-code-extensions.vscode-clangd",
+        "ms-vscode.cmake-tools",
+        "vadimcn.vscode-lldb",
+        "matepek.vscode-catch2-test-adapter",
+        "twxs.cmake"
+      ],
+      "settings": {{
+        "C_Cpp.intelliSenseEngine": "disabled",
+        "cmake.useCMakePresets": "always",
+        "cmake.copyCompileCommands": "${{workspaceFolder}}/compile_commands.json",
+        "cmake.buildDirectory": "${{workspaceFolder}}/build/debug",
+        "testMate.cpp.test.executables": [
+          "${{workspaceFolder}}/build/debug/bin/*test*",
+          "${{workspaceFolder}}/build/debug/bin/*_test"
+        ],
+        "testMate.cpp.debug.configTemplate": {{
+          "type": "lldb",
+          "request": "launch",
+          "program": "${{exec}}",
+          "args": "${{argsArray}}",
+          "cwd": "${{workspaceFolder}}"
+        }}
+      }}
+    }}
+  }},
+  "onCreateCommand": "bash .devcontainer/setup.sh deps",
+  "postCreateCommand": "bash .devcontainer/setup.sh build",
+  "postStartCommand": "cmake -E create_symlink build/debug/compile_commands.json compile_commands.json || true",
+  "remoteUser": "vscode",
+  "hostRequirements": {{
+    "cpus": 2,
+    "memory": "4gb",
+    "storage": "32gb"
+  }}
+}}
+"""
+
+
+def _devcontainer_setup_sh(ctx: _Context) -> str:
+    """Setup script for Codespaces create/build steps."""
+    _ = ctx
+    return """\
+#!/usr/bin/env bash
+# GitHub Codespaces / Dev Container setup for cppboot projects.
+set -euo pipefail
+
+mode="${1:-all}"
+
+install_deps() {
+  echo "[devcontainer] installing Ninja, clang-format, Doxygen, Universal Ctags..."
+  sudo apt-get update
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \\
+    ninja-build \\
+    clang-format \\
+    doxygen \\
+    universal-ctags \\
+    gdb
+}
+
+configure_and_build() {
+  echo "[devcontainer] configuring Debug preset (FetchContent may take a few minutes)..."
+  cmake --preset debug
+  echo "[devcontainer] building Debug..."
+  cmake --build --preset debug --parallel
+  if [ -f build/debug/compile_commands.json ]; then
+    ln -sfn build/debug/compile_commands.json compile_commands.json
+    echo "[devcontainer] linked compile_commands.json for clangd"
+  fi
+  echo "[devcontainer] build complete. Try: ./build/debug/bin/* --version  or  make test"
+}
+
+case "${mode}" in
+  deps) install_deps ;;
+  build) configure_and_build ;;
+  all)
+    install_deps
+    configure_and_build
+    ;;
+  *)
+    echo "usage: $0 [deps|build|all]" >&2
+    exit 2
+    ;;
+esac
 """
 
 
@@ -1351,6 +1692,7 @@ def _vscode_extensions() -> str:
     "llvm-vs-code-extensions.vscode-clangd",
     "ms-vscode.cmake-tools",
     "vadimcn.vscode-lldb",
+    "matepek.vscode-catch2-test-adapter",
     "twxs.cmake"
   ],
   "unwantedRecommendations": [
@@ -1368,10 +1710,14 @@ def _vscode_settings(ctx: _Context) -> str:
   "files.insertFinalNewline": true,
   "files.trimTrailingWhitespace": true,
   "C_Cpp.intelliSenseEngine": "disabled",
+  "clangd.path": "clangd",
   "clangd.arguments": [
     "--compile-commands-dir=${workspaceFolder}",
-    "--header-insertion=never"
+    "--header-insertion=never",
+    "--background-index",
+    "--query-driver=/**/clang*,/**/g++,/**/gcc*,/**/c++,/**/cc,/**/clang-cl*"
   ],
+  "clangd.onConfigChanged": "restart",
   "cmake.configureOnOpen": true,
   "cmake.useCMakePresets": "always",
   "cmake.options.statusBarVisibility": "visible",
@@ -1382,6 +1728,33 @@ def _vscode_settings(ctx: _Context) -> str:
     "--output-on-failure",
     "--parallel"
   ],
+  "testMate.cpp.test.executables": [
+    "${workspaceFolder}/build/debug/bin/*test*",
+    "${workspaceFolder}/build/debug/bin/*_test",
+    "${workspaceFolder}/build/debug/bin/*_test.exe",
+    "${workspaceFolder}/build/debug/bin/*test*.exe"
+  ],
+  "testMate.cpp.test.advancedExecutables": [
+    {
+      "pattern": "${workspaceFolder}/build/debug/bin/*test*",
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "GTEST_COLOR": "1"
+      }
+    }
+  ],
+  "testMate.cpp.debug.configTemplate": {
+    "type": "lldb",
+    "request": "launch",
+    "program": "${exec}",
+    "args": "${argsArray}",
+    "cwd": "${workspaceFolder}",
+    "sourceFileMap": {
+      "/__w/": "${workspaceFolder}/"
+    }
+  },
+  "testMate.cpp.test.workingDirectory": "${workspaceFolder}",
+  "testMate.cpp.log.logpanel": false,
   "files.associations": {
     "CMakeLists.txt": "cmake",
     "*.hpp": "cpp",
@@ -1394,6 +1767,8 @@ def _vscode_settings(ctx: _Context) -> str:
 
 def _vscode_tasks(ctx: _Context) -> str:
     _ = ctx
+    # After configure, place compile_commands.json at the repo root for clangd.
+    # (CMake Tools copyCompileCommands only runs when CMake Tools configures.)
     return """\
 {
   "version": "2.0.0",
@@ -1409,6 +1784,59 @@ def _vscode_tasks(ctx: _Context) -> str:
       "problemMatcher": []
     },
     {
+      "label": "Reconfigure Debug (clean)",
+      "type": "shell",
+      "command": "cmake",
+      "args": [
+        "-E",
+        "rm",
+        "-rf",
+        "build/debug"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "Configure Debug (after clean)",
+      "dependsOrder": "sequence",
+      "dependsOn": [
+        "Reconfigure Debug (clean)",
+        "Configure Debug"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "Link compile_commands (Debug)",
+      "type": "shell",
+      "command": "cmake",
+      "args": [
+        "-E",
+        "create_symlink",
+        "build/debug/compile_commands.json",
+        "compile_commands.json"
+      ],
+      "windows": {
+        "command": "cmake",
+        "args": [
+          "-E",
+          "copy_if_different",
+          "build/debug/compile_commands.json",
+          "compile_commands.json"
+        ]
+      },
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "dependsOn": "Configure Debug",
+      "problemMatcher": []
+    },
+    {
       "label": "Build Debug",
       "type": "shell",
       "command": "cmake",
@@ -1420,7 +1848,28 @@ def _vscode_tasks(ctx: _Context) -> str:
         "kind": "build",
         "isDefault": true
       },
-      "dependsOn": "Configure Debug",
+      "dependsOn": "Link compile_commands (Debug)",
+      "problemMatcher": ["$gcc"]
+    },
+    {
+      "label": "Build Debug (clean reconfigure)",
+      "dependsOrder": "sequence",
+      "dependsOn": [
+        "Reconfigure Debug (clean)",
+        "Link compile_commands (Debug)",
+        "Build Debug core"
+      ],
+      "group": "build",
+      "problemMatcher": []
+    },
+    {
+      "label": "Build Debug core",
+      "type": "shell",
+      "command": "cmake",
+      "args": ["--build", "--preset", "debug", "--parallel"],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
       "problemMatcher": ["$gcc"]
     },
     {
@@ -1515,11 +1964,13 @@ def _vscode_launch(ctx: _Context) -> str:
 """
 
 
+
 def _github_actions_workflow(ctx: _Context) -> str:
     """Cross-platform CI: Linux/macOS/Windows × Debug+Release, test, bench."""
     return f"""\
 # Generated by cppboot (default; --no-github-actions to skip)
 # Matrix CI: Ubuntu, macOS, Windows — Debug + Release builds, tests, benchmarks.
+# Action pins: latest stable majors (checkout/upload-artifact v7; get-cmake latest CMake/Ninja).
 name: CI
 
 on:
@@ -1541,6 +1992,8 @@ jobs:
           - ubuntu-latest
           - macos-latest
           - windows-latest
+    env:
+      APP_NAME: {ctx.name}
 
     defaults:
       run:
@@ -1548,10 +2001,13 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
-      - name: Install CMake and Ninja
-        uses: lukka/get-cmake@v4
+      - name: Install latest CMake and Ninja
+        uses: lukka/get-cmake@latest
+        with:
+          cmakeVersion: latest
+          ninjaVersion: latest
 
       - name: Enable MSVC developer command prompt
         if: runner.os == 'Windows'
@@ -1583,7 +2039,7 @@ jobs:
       - name: Benchmark (Release)
         run: |
           set -euo pipefail
-          # Collect Google Benchmark binaries (handles --no-sample with none).
+          # Collect Google Benchmark binaries (none is OK).
           bins="$(find build/release -type f \\( -name '*bench' -o -name '*_bench' -o -name '*bench.exe' -o -name '*_bench.exe' \\) 2>/dev/null | head -n 20 || true)"
           if [ -z "${{bins}}" ]; then
             echo "No benchmark binaries found; skipping."
@@ -1599,21 +2055,183 @@ jobs:
             "${{bin}}" --benchmark_min_time=0.01s
           done <<< "${{bins}}"
 
-      - name: Upload Debug binaries
-        uses: actions/upload-artifact@v4
+      # Archives: <app>-<os>-<arch>-<debug|release>-<version>.zip
+      - name: Package Debug artifacts
+        id: pkg_debug
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os, re, shutil, subprocess
+          from pathlib import Path
+
+          app = os.environ["APP_NAME"]
+          os_name = {{"Linux": "linux", "macOS": "macos", "Windows": "windows"}}.get(
+              os.environ.get("RUNNER_OS", ""), os.environ.get("RUNNER_OS", "unknown").lower()
+          )
+          arch = {{"X64": "x86_64", "ARM64": "arm64", "X86": "x86"}}.get(
+              os.environ.get("RUNNER_ARCH", ""), os.environ.get("RUNNER_ARCH", "unknown").lower()
+          )
+          config = "debug"
+          bin_dir = Path("build") / config / "bin"
+          version = "0.1.0"
+          for candidate in (bin_dir / app, bin_dir / f"{{app}}.exe"):
+              if candidate.is_file():
+                  try:
+                      out = subprocess.check_output([str(candidate), "--version"], text=True, stderr=subprocess.STDOUT)
+                      m = re.search(r"\\d+\\.\\d+\\.\\d+", out)
+                      if m:
+                          version = m.group(0)
+                  except Exception:
+                      pass
+                  break
+          stem = f"{{app}}-{{os_name}}-{{arch}}-{{config}}-{{version}}"
+          staging = Path("dist") / stem
+          if staging.exists():
+              shutil.rmtree(staging)
+          staging.mkdir(parents=True)
+          if bin_dir.is_dir():
+              for p in bin_dir.iterdir():
+                  dest = staging / p.name
+                  if p.is_file():
+                      shutil.copy2(p, dest)
+                  elif p.is_dir():
+                      shutil.copytree(p, dest)
+          archive = shutil.make_archive(str(Path("dist") / stem), "zip", root_dir="dist", base_dir=stem)
+          print(f"Created {{archive}}")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
+              fh.write(f"artifact_name={{stem}}\\n")
+              fh.write(f"artifact_path={{archive}}\\n")
+          PY
+
+      - name: Upload Debug artifact
+        uses: actions/upload-artifact@v7
         with:
-          name: {ctx.name}-${{{{ matrix.os }}}}-debug
-          path: build/debug/bin/*
-          if-no-files-found: warn
+          name: ${{{{ steps.pkg_debug.outputs.artifact_name }}}}
+          path: ${{{{ steps.pkg_debug.outputs.artifact_path }}}}
+          if-no-files-found: error
           retention-days: 14
 
-      - name: Upload Release binaries
-        uses: actions/upload-artifact@v4
+      - name: Package Release artifacts
+        id: pkg_release
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os, re, shutil, subprocess
+          from pathlib import Path
+
+          app = os.environ["APP_NAME"]
+          os_name = {{"Linux": "linux", "macOS": "macos", "Windows": "windows"}}.get(
+              os.environ.get("RUNNER_OS", ""), os.environ.get("RUNNER_OS", "unknown").lower()
+          )
+          arch = {{"X64": "x86_64", "ARM64": "arm64", "X86": "x86"}}.get(
+              os.environ.get("RUNNER_ARCH", ""), os.environ.get("RUNNER_ARCH", "unknown").lower()
+          )
+          config = "release"
+          bin_dir = Path("build") / config / "bin"
+          version = "0.1.0"
+          for candidate in (bin_dir / app, bin_dir / f"{{app}}.exe"):
+              if candidate.is_file():
+                  try:
+                      out = subprocess.check_output([str(candidate), "--version"], text=True, stderr=subprocess.STDOUT)
+                      m = re.search(r"\\d+\\.\\d+\\.\\d+", out)
+                      if m:
+                          version = m.group(0)
+                  except Exception:
+                      pass
+                  break
+          stem = f"{{app}}-{{os_name}}-{{arch}}-{{config}}-{{version}}"
+          staging = Path("dist") / stem
+          if staging.exists():
+              shutil.rmtree(staging)
+          staging.mkdir(parents=True)
+          if bin_dir.is_dir():
+              for p in bin_dir.iterdir():
+                  dest = staging / p.name
+                  if p.is_file():
+                      shutil.copy2(p, dest)
+                  elif p.is_dir():
+                      shutil.copytree(p, dest)
+          archive = shutil.make_archive(str(Path("dist") / stem), "zip", root_dir="dist", base_dir=stem)
+          print(f"Created {{archive}}")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
+              fh.write(f"artifact_name={{stem}}\\n")
+              fh.write(f"artifact_path={{archive}}\\n")
+          PY
+
+      - name: Upload Release artifact
+        uses: actions/upload-artifact@v7
         with:
-          name: {ctx.name}-${{{{ matrix.os }}}}-release
-          path: build/release/bin/*
-          if-no-files-found: warn
+          name: ${{{{ steps.pkg_release.outputs.artifact_name }}}}
+          path: ${{{{ steps.pkg_release.outputs.artifact_path }}}}
+          if-no-files-found: error
           retention-days: 14
+"""
+
+
+def _github_actions_sanitizers_workflow(ctx: _Context) -> str:
+    """Linux ASan+UBSan build and test; failures fail the job."""
+    return f"""\
+# Generated by cppboot (default; --no-github-actions to skip)
+# Linux AddressSanitizer + UndefinedBehaviorSanitizer: build and run unit tests.
+# Sanitizer errors abort the process so the job fails.
+name: Sanitizers
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ${{{{ github.workflow }}}}-${{{{ github.ref }}}}
+  cancel-in-progress: true
+
+jobs:
+  asan-ubsan:
+    name: ASan+UBSan (ubuntu-latest)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install latest CMake and Ninja
+        uses: lukka/get-cmake@latest
+        with:
+          cmakeVersion: latest
+          ninjaVersion: latest
+
+      - name: Configure (sanitizers)
+        run: >
+          cmake -S . -B build/sanitizer -G Ninja
+          -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+          -DCMAKE_C_COMPILER=clang
+          -DCMAKE_CXX_COMPILER=clang++
+          -D{ctx.macro}_ENABLE_SANITIZERS=ON
+
+      - name: Build
+        run: cmake --build build/sanitizer --parallel
+
+      - name: Test under ASan+UBSan
+        env:
+          ASAN_OPTIONS: halt_on_error=1:abort_on_error=1:detect_leaks=1:detect_stack_use_after_return=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: ctest --test-dir build/sanitizer --output-on-failure --parallel
+
+      - name: Smoke run app under sanitizers
+        env:
+          ASAN_OPTIONS: halt_on_error=1:abort_on_error=1:detect_leaks=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: |
+          set -euo pipefail
+          bin="build/sanitizer/bin/{ctx.name}"
+          if [ ! -x "${{bin}}" ]; then
+            echo "app binary not found at ${{bin}}"
+            exit 1
+          fi
+          "${{bin}}" --version
 """
 
 
@@ -1703,9 +2321,18 @@ IncludeBlocks: Regroup
 
 
 def _clangd() -> str:
+    # Prefer the source-root database (symlinked/copied from the build tree).
+    # Fallback paths help before the first build finishes linking the root file.
     return """\
 CompileFlags:
   CompilationDatabase: .
+---
+If:
+  PathMatch: .*
+CompileFlags:
+  Add:
+    - -std=c++20
+    - -Iinclude
 """
 
 
@@ -1833,235 +2460,95 @@ nnoremap <leader>f :make fmt<CR>
 """
 
 
-def _calc_header(ctx: _Context) -> str:
+
+def _version_header(ctx: _Context) -> str:
     return f"""\
 #pragma once
 
-/**
- * @file calc.hpp
- * @brief Trivial calculator type used as the sample library surface.
- */
-
-namespace {ctx.namespace} {{
+#include <string_view>
 
 /**
- * @brief Integer calculator with basic arithmetic.
+ * @file version.hpp
+ * @brief Package version API for {ctx.name}.
  *
- * This type is intentionally small: it demonstrates the library layer,
- * unit tests, mocks, and benchmarks produced by cppboot.
+ * Keep the reported version in sync with the CMake `project(... VERSION ...)`
+ * value (default 0.1.0).
  */
-class Calc {{
- public:
-  /// Constructs a calculator with accumulator value zero.
-  Calc() = default;
-
-  /**
-   * @brief Constructs a calculator with an initial accumulator value.
-   * @param value Initial accumulator.
-   */
-  explicit Calc(int value);
-
-  /**
-   * @brief Adds @p x to the accumulator.
-   * @param x Value to add.
-   * @return Reference to this calculator.
-   */
-  Calc& Add(int x);
-
-  /**
-   * @brief Subtracts @p x from the accumulator.
-   * @param x Value to subtract.
-   * @return Reference to this calculator.
-   */
-  Calc& Sub(int x);
-
-  /**
-   * @brief Multiplies the accumulator by @p x.
-   * @param x Multiplier.
-   * @return Reference to this calculator.
-   */
-  Calc& Mul(int x);
-
-  /**
-   * @brief Returns the current accumulator value.
-   */
-  [[nodiscard]] int value() const;
-
- private:
-  int value_{{0}};
-}};
-
-}}  // namespace {ctx.namespace}
-"""
-
-
-def _calc_source(ctx: _Context) -> str:
-    return f"""\
-#include "{ctx.namespace}/calc.hpp"
 
 namespace {ctx.namespace} {{
 
-Calc::Calc(int value) : value_(value) {{}}
+/// Semantic version major component.
+inline constexpr int kVersionMajor = 0;
+/// Semantic version minor component.
+inline constexpr int kVersionMinor = 1;
+/// Semantic version patch component.
+inline constexpr int kVersionPatch = 0;
 
-Calc& Calc::Add(int x) {{
-  value_ += x;
-  return *this;
-}}
-
-Calc& Calc::Sub(int x) {{
-  value_ -= x;
-  return *this;
-}}
-
-Calc& Calc::Mul(int x) {{
-  value_ *= x;
-  return *this;
-}}
-
-int Calc::value() const {{ return value_; }}
+/**
+ * @brief Returns the package version string (semantic version).
+ * @return Version such as "0.1.0". Never empty.
+ */
+[[nodiscard]] std::string_view Version() noexcept;
 
 }}  // namespace {ctx.namespace}
 """
 
 
-def _calc_module(ctx: _Context) -> str:
+def _version_source(ctx: _Context) -> str:
+    return f"""\
+#include "{ctx.namespace}/version.hpp"
+
+namespace {ctx.namespace} {{
+
+std::string_view Version() noexcept {{
+  return "0.1.0";
+}}
+
+}}  // namespace {ctx.namespace}
+"""
+
+
+def _version_module(ctx: _Context) -> str:
     return f"""\
 /**
- * @file calc.cppm
- * @brief C++20 module interface for the sample calculator.
+ * @file version.cppm
+ * @brief C++20 module interface for the package version API.
  */
 
 module;
 
-export module {ctx.namespace}.calc;
+#include <string_view>
+
+export module {ctx.namespace}.version;
 
 /**
- * @brief Integer calculator with basic arithmetic.
+ * @brief Package version helpers for {ctx.name}.
  */
 export namespace {ctx.namespace} {{
 
-class Calc {{
- public:
-  Calc() = default;
-  explicit Calc(int value);
+inline constexpr int kVersionMajor = 0;
+inline constexpr int kVersionMinor = 1;
+inline constexpr int kVersionPatch = 0;
 
-  Calc& Add(int x);
-  Calc& Sub(int x);
-  Calc& Mul(int x);
-
-  [[nodiscard]] int value() const;
-
- private:
-  int value_{{0}};
-}};
+[[nodiscard]] std::string_view Version() noexcept;
 
 }}  // namespace {ctx.namespace}
 
 namespace {ctx.namespace} {{
 
-Calc::Calc(int value) : value_(value) {{}}
-
-Calc& Calc::Add(int x) {{
-  value_ += x;
-  return *this;
+std::string_view Version() noexcept {{
+  return "0.1.0";
 }}
-
-Calc& Calc::Sub(int x) {{
-  value_ -= x;
-  return *this;
-}}
-
-Calc& Calc::Mul(int x) {{
-  value_ *= x;
-  return *this;
-}}
-
-int Calc::value() const {{ return value_; }}
-
-}}  // namespace {ctx.namespace}
-"""
-
-
-def _library_anchor_cpp(ctx: _Context) -> str:
-    return f"""\
-/**
- * @file library_anchor.cpp
- * @brief Placeholder translation unit so the library target is non-empty.
- *
- * Generated because this project was created with --no-sample. Delete this file
- * and its target_sources entry in src/CMakeLists.txt when you add a real
- * component under src/<component>/.
- */
-
-namespace {ctx.namespace} {{
-namespace {{
-
-// Ensures the TU is not completely empty under pedantic toolchains.
-constexpr int kLibraryAnchor = 0;
-
-}}  // namespace
-
-// ODR-used from main so the anchor is not stripped as unused.
-int LibraryAnchor() {{ return kLibraryAnchor; }}
 
 }}  // namespace {ctx.namespace}
 """
 
 
 def _main_cpp(ctx: _Context) -> str:
-    if not ctx.with_sample:
-        return f"""\
-/**
- * @file main.cpp
- * @brief Program entrypoint (always src/main.cpp in cppboot projects).
- *
- * Keep this file thin: parse args / wire dependencies, then call library code.
- * Sample library code was omitted (--no-sample); add components under src/.
- */
-
-#include <iostream>
-
-namespace {ctx.namespace} {{
-int LibraryAnchor();
-}}  // namespace {ctx.namespace}
-
-/**
- * @brief Program entry.
- * @return Exit status.
- */
-int main() {{
-  // Touch the library so the empty-project anchor links cleanly.
-  static_cast<void>({ctx.namespace}::LibraryAnchor());
-  std::cout << "{ctx.name}: ready. Add components under src/ "
-            << "(see README.md / AGENTS.md).\\n";
-  return 0;
-}}
-"""
-
     if ctx.with_modules:
-        return f"""\
-/**
- * @file main.cpp
- * @brief Program entrypoint (always src/main.cpp in cppboot projects).
- *
- * Keep this file thin: parse args / wire dependencies, then call library code.
- */
-
-import {ctx.namespace}.calc;
-
-#include <iostream>
-
-/**
- * @brief Program entry.
- * @return Exit status.
- */
-int main() {{
-  {ctx.namespace}::Calc calc(2);
-  calc.Add(3).Mul(4);
-  std::cout << "{ctx.name} sample: " << calc.value() << '\\n';
-  return 0;
-}}
-"""
+        version_include = f"import {ctx.namespace}.version;"
+    else:
+        version_include = f'#include "{ctx.namespace}/version.hpp"'
     return f"""\
 /**
  * @file main.cpp
@@ -2070,145 +2557,102 @@ int main() {{
  * Keep this file thin: parse args / wire dependencies, then call library code.
  */
 
-#include "{ctx.namespace}/calc.hpp"
+{version_include}
+
+#include <CLI/CLI.hpp>
 
 #include <iostream>
+#include <string>
 
 /**
  * @brief Program entry.
+ * @param argc Argument count.
+ * @param argv Argument vector.
  * @return Exit status.
  */
-int main() {{
-  {ctx.namespace}::Calc calc(2);
-  calc.Add(3).Mul(4);
-  std::cout << "{ctx.name} sample: " << calc.value() << '\\n';
+int main(int argc, char** argv) {{
+  CLI::App app{{"{ctx.name} — cppboot project"}};
+  app.set_version_flag("-V,--version", std::string{{{ctx.namespace}::Version()}});
+  CLI11_PARSE(app, argc, argv);
+
+  std::cout << "{ctx.name} " << {ctx.namespace}::Version()
+            << " — add components under src/ (see README.md / AGENTS.md)\\n";
   return 0;
 }}
 """
 
 
-def _calc_test(ctx: _Context) -> str:
+def _version_test(ctx: _Context) -> str:
     if ctx.with_modules:
-        includes = f"import {ctx.namespace}.calc;\n\n#include <gtest/gtest.h>"
+        includes = f"import {ctx.namespace}.version;\n\n#include <gtest/gtest.h>"
     else:
         includes = (
-            f'#include "{ctx.namespace}/calc.hpp"\n\n'
+            f'#include "{ctx.namespace}/version.hpp"\n\n'
             "#include <gtest/gtest.h>"
         )
     return f"""\
 /**
- * @file calc_test.cpp
- * @brief Unit tests for {ctx.namespace}::Calc.
+ * @file version_test.cpp
+ * @brief Unit tests for {ctx.namespace}::Version.
  */
 
 {includes}
 
+#include <string_view>
+
 namespace {{
 
-TEST(CalcTest, DefaultIsZero) {{
-  {ctx.namespace}::Calc calc;
-  EXPECT_EQ(calc.value(), 0);
+TEST(VersionTest, IsNonEmpty) {{
+  const std::string_view version = {ctx.namespace}::Version();
+  EXPECT_FALSE(version.empty());
 }}
 
-TEST(CalcTest, AddSubMul) {{
-  {ctx.namespace}::Calc calc(10);
-  calc.Add(5).Sub(3).Mul(2);
-  EXPECT_EQ(calc.value(), 24);
+TEST(VersionTest, MatchesDefaultSemver) {{
+  EXPECT_EQ({ctx.namespace}::Version(), "0.1.0");
+  EXPECT_EQ({ctx.namespace}::kVersionMajor, 0);
+  EXPECT_EQ({ctx.namespace}::kVersionMinor, 1);
+  EXPECT_EQ({ctx.namespace}::kVersionPatch, 0);
+}}
+
+TEST(VersionTest, HasThreeNumericComponents) {{
+  const std::string_view version = {ctx.namespace}::Version();
+  EXPECT_EQ(version.find('.'), 1U);
+  EXPECT_NE(version.rfind('.'), std::string_view::npos);
+  EXPECT_NE(version.find('.'), version.rfind('.'));
 }}
 
 }}  // namespace
 """
 
 
-def _mock_calc_test(ctx: _Context) -> str:
-    # GoogleMock example: mock a dependency interface and exercise collaboration.
+def _version_bench(ctx: _Context) -> str:
     if ctx.with_modules:
-        calc_import = f"import {ctx.namespace}.calc;\n\n"
-        # For modules, we still define the mockable interface in the test TU.
-        calc_include = ""
-    else:
-        calc_import = ""
-        calc_include = f'#include "{ctx.namespace}/calc.hpp"\n\n'
-    return f"""\
-/**
- * @file mock_calc_test.cpp
- * @brief GoogleMock example around a calculator-facing interface.
- */
-
-{calc_import}{calc_include}#include <gmock/gmock.h>
-#include <gtest/gtest.h>
-
-namespace {{
-
-/**
- * @brief Narrow interface used to demonstrate GoogleMock.
- */
-class Adder {{
- public:
-  virtual ~Adder() = default;
-  virtual int Add(int a, int b) const = 0;
-}};
-
-class MockAdder : public Adder {{
- public:
-  MOCK_METHOD(int, Add, (int a, int b), (const, override));
-}};
-
-/**
- * @brief Uses an Adder to combine the calculator accumulator with a delta.
- */
-int CombineWithAdder(const {ctx.namespace}::Calc& calc, const Adder& adder, int delta) {{
-  return adder.Add(calc.value(), delta);
-}}
-
-using ::testing::Return;
-
-TEST(MockCalcTest, UsesMockAdder) {{
-  {ctx.namespace}::Calc calc(7);
-  MockAdder mock_adder;
-  EXPECT_CALL(mock_adder, Add(7, 3)).WillOnce(Return(10));
-  EXPECT_EQ(CombineWithAdder(calc, mock_adder, 3), 10);
-}}
-
-}}  // namespace
-"""
-
-
-def _calc_bench(ctx: _Context) -> str:
-    if ctx.with_modules:
-        includes = f"import {ctx.namespace}.calc;\n\n#include <benchmark/benchmark.h>"
+        includes = f"import {ctx.namespace}.version;\n\n#include <benchmark/benchmark.h>"
     else:
         includes = (
-            f'#include "{ctx.namespace}/calc.hpp"\n\n'
+            f'#include "{ctx.namespace}/version.hpp"\n\n'
             "#include <benchmark/benchmark.h>"
         )
     return f"""\
 /**
- * @file calc_bench.cpp
- * @brief Microbenchmarks for {ctx.namespace}::Calc.
+ * @file version_bench.cpp
+ * @brief Microbenchmarks for {ctx.namespace}::Version.
  */
 
 {includes}
 
+#include <string_view>
+
 namespace {{
 
-void BM_CalcAdd(benchmark::State& state) {{
-  {ctx.namespace}::Calc calc;
+void BM_Version(benchmark::State& state) {{
   for (auto _ : state) {{
-    calc.Add(1);
-    benchmark::DoNotOptimize(calc.value());
+    // Mutable lvalue required: const-ref DoNotOptimize is deprecated under -Werror.
+    std::string_view version = {ctx.namespace}::Version();
+    benchmark::DoNotOptimize(version);
   }}
 }}
-BENCHMARK(BM_CalcAdd);
-
-void BM_CalcMul(benchmark::State& state) {{
-  for (auto _ : state) {{
-    {ctx.namespace}::Calc calc(2);
-    calc.Mul(3).Mul(5);
-    benchmark::DoNotOptimize(calc.value());
-  }}
-}}
-BENCHMARK(BM_CalcMul);
+BENCHMARK(BM_Version);
 
 }}  // namespace
 """
