@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-07-27
+
+### Fixed
+
+- CI: stop hardcoding the package version in layout tests (failed after 0.2.0 bump).
+
 ## [0.2.0] - 2026-07-27
 
 ### Added
