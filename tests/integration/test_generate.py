@@ -113,7 +113,23 @@ def test_modules_layout(tmp_root: Path) -> None:
     assert "version.cppm" in version_cmake
     main = (root / "src" / "main.cpp").read_text(encoding="utf-8")
     assert "import " in main
-    assert "#include" not in main or "CLI" in main  # CLI11 still classic header
+    assert main.find("#include") < main.find("import ")  # classic headers before import
+    cppm = (root / "cmake" / "version.cppm.in").read_text(encoding="utf-8")
+    assert "const char* Version()" in cppm
+    assert "string_view" not in cppm
+
+
+def test_modules_ci_installs_capable_toolchains(tmp_root: Path) -> None:
+    opts = minimal_options(
+        "modci",
+        tmp_root,
+        with_modules=True,
+        with_github_actions=True,
+    )
+    generate_project(opts)
+    ci = (tmp_root / "modci" / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    assert "g++-14" in ci
+    assert "brew install llvm" in ci
 
 
 def test_shared_library(tmp_root: Path) -> None:
