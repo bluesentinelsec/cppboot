@@ -92,6 +92,34 @@ Optional full C++ smoke (local only, not required for CI):
 bash scripts/smoke.sh
 ```
 
+### Package layout
+
+```text
+src/cppboot/
+  cli.py              # argparse entrypoint
+  names.py            # name validation / identifiers
+  licenses.py         # license fetch (online + offline)
+  options.py          # ProjectOptions / GenerateResult
+  generator.py        # stable facade (re-exports generate_project)
+  generate/           # implementation
+    project.py        # orchestration
+    cmake_files.py
+    build_wrappers.py # Makefile + build.bat
+    sources.py        # VERSION + C++ templates
+    docs.py
+    ide.py
+    github_actions.py
+    tooling.py        # fmt / git / gh
+```
+
+Public imports:
+
+```python
+from cppboot import ProjectOptions, generate_project
+# or
+from cppboot.generator import ProjectOptions, generate_project
+```
+
 ## Smoke check (generated C++ project)
 
 ```bash
