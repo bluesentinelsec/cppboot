@@ -109,10 +109,17 @@ def generate_project(options: ProjectOptions) -> GenerateResult:
         logger.debug("wrote %s", path)
 
     # Root files
+    write("VERSION", _version_file())
     write("CMakeLists.txt", _root_cmake(ctx))
     write("Makefile", _makefile(ctx))
+    write("build.bat", _build_bat(ctx))
     write("README.md", _readme(ctx))
     write("AGENTS.md", _agents_md(ctx))
+    # Repo-local community health files override GitHub user/org defaults
+    # (e.g. a personal .github repo with company-specific templates).
+    write("CODE_OF_CONDUCT.md", _code_of_conduct_md())
+    write("CONTRIBUTING.md", _contributing_md(ctx))
+    write("SECURITY.md", _security_md(ctx))
     write(".gitignore", _gitignore())
     write(".gitattributes", _gitattributes())
     write(".clang-format", _clang_format())
@@ -121,16 +128,20 @@ def generate_project(options: ProjectOptions) -> GenerateResult:
     write("cmake/Dependencies.cmake", _dependencies_cmake(ctx))
     write("cmake/CompilerWarnings.cmake", _warnings_cmake())
     write("cmake/Sanitizers.cmake", _sanitizers_cmake())
+    # Version API is generated from VERSION via configure_file (single source).
+    if ctx.with_modules:
+        write("cmake/version.cppm.in", _version_module_in(ctx))
+    else:
+        write("cmake/version.hpp.in", _version_header_in(ctx))
+        write("cmake/version.cpp.in", _version_source_in(ctx))
+        # Keep the public include tree present for new components (version.hpp
+        # is generated into the build tree, not checked into include/).
+        write(f"include/{ctx.namespace}/.gitkeep", "")
 
     # Default library surface: version API + thin CLI with --version.
     write("src/CMakeLists.txt", _src_cmake(ctx))
     write("src/main.cpp", _main_cpp(ctx))
     write("src/version/CMakeLists.txt", _version_src_cmake(ctx))
-    if ctx.with_modules:
-        write("src/version/version.cppm", _version_module(ctx))
-    else:
-        write(f"include/{ctx.namespace}/version.hpp", _version_header(ctx))
-        write("src/version/version.cpp", _version_source(ctx))
 
     # Tests
     write("tests/CMakeLists.txt", _tests_cmake(ctx))
@@ -172,6 +183,7 @@ def generate_project(options: ProjectOptions) -> GenerateResult:
     if ctx.with_github_actions:
         write(".github/workflows/ci.yml", _github_actions_workflow(ctx))
         write(".github/workflows/sanitizers.yml", _github_actions_sanitizers_workflow(ctx))
+        write(".github/workflows/release.yml", _github_actions_release_workflow(ctx))
         logger.info("wrote GitHub Actions workflows under .github/workflows/")
 
     year = ctx.year
@@ -348,29 +360,77 @@ def _root_cmake(ctx: _Context) -> str:
 # C++20 modules require a recent CMake and toolchain.
 set(CMAKE_CXX_SCAN_FOR_MODULES ON)
 """
-    public_includes = ""
-    if not ctx.with_modules:
-        public_includes = f"""
+    if ctx.with_modules:
+        version_generate = f"""\
+# Generate the version module from cmake/version.cppm.in (values from VERSION).
+set({ctx.macro}_GENERATED_DIR "${{CMAKE_CURRENT_BINARY_DIR}}/generated")
+configure_file(
+  "${{CMAKE_CURRENT_SOURCE_DIR}}/cmake/version.cppm.in"
+  "${{{ctx.macro}_GENERATED_DIR}}/version.cppm"
+  @ONLY
+)
+"""
+        public_includes = f"""\
+# Module interface units provide the public API; no classic include tree.
+# Generated module unit lives under ${{{ctx.macro}_GENERATED_DIR}}.
+"""
+    else:
+        version_generate = f"""\
+# Generate the version API from cmake/version.{{hpp,cpp}}.in (values from VERSION).
+set({ctx.macro}_GENERATED_DIR "${{CMAKE_CURRENT_BINARY_DIR}}/generated")
+set({ctx.macro}_GENERATED_INCLUDE_DIR "${{{ctx.macro}_GENERATED_DIR}}/include")
+configure_file(
+  "${{CMAKE_CURRENT_SOURCE_DIR}}/cmake/version.hpp.in"
+  "${{{ctx.macro}_GENERATED_INCLUDE_DIR}}/{ctx.namespace}/version.hpp"
+  @ONLY
+)
+configure_file(
+  "${{CMAKE_CURRENT_SOURCE_DIR}}/cmake/version.cpp.in"
+  "${{{ctx.macro}_GENERATED_DIR}}/version.cpp"
+  @ONLY
+)
+"""
+        public_includes = f"""\
 target_include_directories(${{PROJECT_NAME}}_lib
   PUBLIC
     $<BUILD_INTERFACE:${{CMAKE_CURRENT_SOURCE_DIR}}/include>
+    $<BUILD_INTERFACE:${{{ctx.macro}_GENERATED_INCLUDE_DIR}}>
     $<INSTALL_INTERFACE:include>
 )
-"""
-    else:
-        public_includes = """
-# Module interface units provide the public API; no classic include tree.
 """
 
     cmake_min = "3.28" if ctx.with_modules else "3.20"
     return f"""\
 cmake_minimum_required(VERSION {cmake_min})
 
+# ---------------------------------------------------------------------------
+# Single source of truth for the package version: the VERSION file at repo root.
+# Edit that file only; CMake, --version, tests, and release checks all consume it.
+# ---------------------------------------------------------------------------
+file(STRINGS "${{CMAKE_CURRENT_SOURCE_DIR}}/VERSION" {ctx.macro}_VERSION_RAW
+  LIMIT_COUNT 1
+)
+string(STRIP "${{{ctx.macro}_VERSION_RAW}}" {ctx.macro}_VERSION)
+# Allow optional leading 'v' and ignore anything after '#' on the line.
+string(REGEX REPLACE "^[vV]" "" {ctx.macro}_VERSION "${{{ctx.macro}_VERSION}}")
+string(REGEX REPLACE "[ \\t]*#.*" "" {ctx.macro}_VERSION "${{{ctx.macro}_VERSION}}")
+string(STRIP "${{{ctx.macro}_VERSION}}" {ctx.macro}_VERSION)
+if(NOT {ctx.macro}_VERSION MATCHES "^[0-9]+\\\\.[0-9]+\\\\.[0-9]+([.-].*)?$")
+  message(FATAL_ERROR
+    "VERSION file must contain a semantic version like 0.1.0 "
+    "(got '${{{ctx.macro}_VERSION}}')"
+  )
+endif()
+
 project({ctx.name}
-  VERSION 0.1.0
+  VERSION ${{{ctx.macro}_VERSION}}
   DESCRIPTION "C++ project bootstrapped by cppboot"
   LANGUAGES CXX
 )
+
+# Exposed to version templates (configure_file @ONLY).
+set(PROJECT_NAMESPACE "{ctx.namespace}")
+set(PROJECT_VERSION_STRING "${{PROJECT_VERSION}}")
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -412,12 +472,15 @@ if({ctx.macro}_ENABLE_SANITIZERS)
   cppboot_enable_sanitizers()
 endif()
 {modules_block}
+{version_generate}
 add_library(${{PROJECT_NAME}}_lib {lib_type})
 add_library(${{PROJECT_NAME}}::lib ALIAS ${{PROJECT_NAME}}_lib)
 
 set_target_properties(${{PROJECT_NAME}}_lib PROPERTIES
   OUTPUT_NAME {ctx.target}
   EXPORT_NAME lib
+  VERSION ${{PROJECT_VERSION}}
+  SOVERSION ${{PROJECT_VERSION_MAJOR}}
 )
 
 {public_includes}
@@ -485,17 +548,22 @@ install(TARGETS ${PROJECT_NAME}_lib
   FILE_SET CXX_MODULES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/modules
 )
 """
-    return """\
+    return f"""\
 install(DIRECTORY include/
-  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+  DESTINATION ${{CMAKE_INSTALL_INCLUDEDIR}}
   FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h"
 )
-install(TARGETS ${PROJECT_NAME}_lib
-  EXPORT ${PROJECT_NAME}Targets
-  ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-  LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-  INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+# Generated version API header (from VERSION + cmake/version.hpp.in).
+install(DIRECTORY ${{{ctx.macro}_GENERATED_INCLUDE_DIR}}/
+  DESTINATION ${{CMAKE_INSTALL_INCLUDEDIR}}
+  FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h"
+)
+install(TARGETS ${{PROJECT_NAME}}_lib
+  EXPORT ${{PROJECT_NAME}}Targets
+  ARCHIVE DESTINATION ${{CMAKE_INSTALL_LIBDIR}}
+  LIBRARY DESTINATION ${{CMAKE_INSTALL_LIBDIR}}
+  RUNTIME DESTINATION ${{CMAKE_INSTALL_BINDIR}}
+  INCLUDES DESTINATION ${{CMAKE_INSTALL_INCLUDEDIR}}
 )
 """
 
@@ -688,19 +756,19 @@ cppboot_set_project_warnings(${{PROJECT_NAME}}_app)
 def _version_src_cmake(ctx: _Context) -> str:
     if ctx.with_modules:
         return f"""\
-# version component (C++20 module) — package version API.
+# version component (C++20 module) — generated from cmake/version.cppm.in + VERSION.
 target_sources(${{PROJECT_NAME}}_lib
   PUBLIC
     FILE_SET CXX_MODULES FILES
-      version.cppm
+      ${{{ctx.macro}_GENERATED_DIR}}/version.cppm
 )
 """
     return f"""\
-# version component — package version API (keep in sync with project VERSION).
-# List every translation unit explicitly — do not use file(GLOB).
+# version component — generated from cmake/version.{{hpp,cpp}}.in + VERSION file.
+# Edit the root VERSION file only; do not hand-edit the generated sources.
 target_sources(${{PROJECT_NAME}}_lib
   PRIVATE
-    version.cpp
+    ${{{ctx.macro}_GENERATED_DIR}}/version.cpp
 )
 """
 
@@ -916,7 +984,8 @@ fmt:
 
 doc:
 	@command -v doxygen >/dev/null 2>&1 || {{ echo "doxygen not found"; exit 1; }}
-	doxygen Doxyfile
+	@ver=$$(tr -d '[:space:]' < VERSION | sed 's/^v//;s/#.*//'); \\
+	sed "s/^PROJECT_NUMBER.*/PROJECT_NUMBER         = \\"$$ver\\"/" Doxyfile | doxygen -
 {tags_target}
 clean:
 	rm -rf build docs/html docs/latex docs/xml compile_commands.json $(PROJECT_NAME)$(EXE_EXT){clean_extra}
@@ -933,6 +1002,201 @@ copy_compile_commands:
 	  echo "copied compile_commands.json from $(BUILD_DIR)"; \\
 	fi
 """
+
+
+def _build_bat(ctx: _Context) -> str:
+    """Windows cmd wrapper mirroring the GNU Makefile targets."""
+    tags_help = ""
+    tags_block = ""
+    if ctx.with_ctags:
+        tags_help = "echo   build.bat tags          - regenerate ctags index\n"
+        tags_block = """
+:tags
+where ctags >nul 2>&1
+if errorlevel 1 (
+  echo ctags not found ^(install universal-ctags^)
+  exit /b 1
+)
+ctags -R
+echo wrote tags
+goto :eof
+"""
+    tags_dispatch = ""
+    if ctx.with_ctags:
+        tags_dispatch = 'if /I "%CMD%"=="tags" goto tags\n'
+
+    return f"""\
+@echo off
+setlocal EnableExtensions EnableDelayedExpansion
+
+rem Idiomatic Windows wrapper around the CMake build (mirrors Makefile targets).
+rem Usage: build.bat [target]
+rem   build.bat            -> debug
+rem   build.bat release
+rem   build.bat test
+rem   build.bat help
+
+set "PROJECT_NAME={ctx.name}"
+set "PROJECT_MACRO={ctx.macro}"
+set "BUILD_DEBUG=build\\debug"
+set "BUILD_RELEASE=build\\release"
+set "BUILD_SANITIZER=build\\sanitizer"
+set "EXE_NAME=%PROJECT_NAME%.exe"
+
+set "GENERATOR_FLAG="
+if defined GENERATOR (
+  set "GENERATOR_FLAG=-G %GENERATOR%"
+) else (
+  where ninja >nul 2>&1
+  if not errorlevel 1 set "GENERATOR_FLAG=-G Ninja"
+)
+
+set "CMD=%~1"
+if "%CMD%"=="" set "CMD=debug"
+
+if /I "%CMD%"=="help" goto help
+if /I "%CMD%"=="/?" goto help
+if /I "%CMD%"=="-h" goto help
+if /I "%CMD%"=="all" goto debug
+if /I "%CMD%"=="debug" goto debug
+if /I "%CMD%"=="release" goto release
+if /I "%CMD%"=="test" goto test
+if /I "%CMD%"=="bench" goto bench
+if /I "%CMD%"=="sanitizer" goto sanitizer
+if /I "%CMD%"=="fmt" goto fmt
+if /I "%CMD%"=="doc" goto doc
+if /I "%CMD%"=="clean" goto clean
+if /I "%CMD%"=="reconfigure-debug" goto reconfigure_debug
+if /I "%CMD%"=="reconfigure-release" goto reconfigure_release
+if /I "%CMD%"=="configure-debug" goto configure_debug
+if /I "%CMD%"=="configure-release" goto configure_release
+{tags_dispatch}echo Unknown target: %CMD%
+echo Run "build.bat help" for usage.
+exit /b 1
+
+:help
+echo Targets:
+echo   build.bat / build.bat debug  - configure ^& build Debug
+echo   build.bat release            - configure ^& build Release
+echo   build.bat test               - run unit tests ^(Debug^)
+echo   build.bat bench              - run microbenchmarks ^(Release^)
+echo   build.bat sanitizer          - not supported on Windows ^(use Linux^)
+echo   build.bat fmt                - run clang-format on sources
+echo   build.bat doc                - generate Doxygen HTML under docs\\html
+{tags_help}echo   build.bat reconfigure-debug  - wipe build\\debug and reconfigure
+echo   build.bat clean              - remove local build trees
+echo.
+echo Environment:
+echo   set GENERATOR=Ninja          - force a CMake generator
+echo   set CMAKE_FLAGS=...          - extra flags passed to cmake configure
+goto :eof
+
+:reconfigure_debug
+if exist "%BUILD_DEBUG%" rmdir /s /q "%BUILD_DEBUG%"
+call :configure_debug
+goto :eof
+
+:reconfigure_release
+if exist "%BUILD_RELEASE%" rmdir /s /q "%BUILD_RELEASE%"
+call :configure_release
+goto :eof
+
+:configure_debug
+cmake -S . -B "%BUILD_DEBUG%" %GENERATOR_FLAG% -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=ON %CMAKE_FLAGS%
+if errorlevel 1 exit /b 1
+if exist "%BUILD_DEBUG%\\compile_commands.json" (
+  copy /Y "%BUILD_DEBUG%\\compile_commands.json" compile_commands.json >nul
+  echo copied compile_commands.json from %BUILD_DEBUG%
+)
+goto :eof
+
+:configure_release
+cmake -S . -B "%BUILD_RELEASE%" %GENERATOR_FLAG% -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON %CMAKE_FLAGS%
+if errorlevel 1 exit /b 1
+goto :eof
+
+:debug
+call :configure_debug
+if errorlevel 1 exit /b 1
+cmake --build "%BUILD_DEBUG%" --parallel
+if errorlevel 1 exit /b 1
+if exist "%BUILD_DEBUG%\\bin\\%EXE_NAME%" copy /Y "%BUILD_DEBUG%\\bin\\%EXE_NAME%" "%EXE_NAME%" >nul
+goto :eof
+
+:release
+call :configure_release
+if errorlevel 1 exit /b 1
+cmake --build "%BUILD_RELEASE%" --parallel
+if errorlevel 1 exit /b 1
+if exist "%BUILD_RELEASE%\\bin\\%EXE_NAME%" copy /Y "%BUILD_RELEASE%\\bin\\%EXE_NAME%" "%EXE_NAME%" >nul
+goto :eof
+
+:test
+call :debug
+if errorlevel 1 exit /b 1
+ctest --test-dir "%BUILD_DEBUG%" --output-on-failure --parallel
+goto :eof
+
+:bench
+call :release
+if errorlevel 1 exit /b 1
+set "FOUND="
+for /r "%BUILD_RELEASE%" %%F in (*bench.exe *_bench.exe) do (
+  if not defined FOUND set "FOUND=%%F"
+)
+if not defined FOUND (
+  echo No benchmark executables found. Add benchmarks\\^<component^>\\ then rebuild.
+  exit /b 0
+)
+echo Running %FOUND%
+"%FOUND%" --benchmark_min_time=0.01s
+goto :eof
+
+:sanitizer
+echo build.bat sanitizer is intended for Linux ^(GCC/Clang^), not Windows.
+exit /b 1
+
+:fmt
+where clang-format >nul 2>&1
+if errorlevel 1 (
+  echo clang-format not found
+  exit /b 1
+)
+for %%D in (src tests benchmarks include) do (
+  if exist "%%D" (
+    for /r "%%D" %%F in (*.cpp *.hpp *.h *.cc *.cxx *.cppm *.ixx) do (
+      clang-format -i "%%F"
+    )
+  )
+)
+goto :eof
+
+:doc
+where doxygen >nul 2>&1
+if errorlevel 1 (
+  echo doxygen not found
+  exit /b 1
+)
+set "VER="
+for /f "usebackq tokens=* delims=" %%V in ("VERSION") do (
+  if not defined VER set "VER=%%V"
+)
+set "VER=%VER: =%"
+if /I "%VER:~0,1%"=="v" set "VER=%VER:~1%"
+powershell -NoProfile -Command "(Get-Content -Raw Doxyfile) -replace 'PROJECT_NUMBER\\s*=.*', ('PROJECT_NUMBER         = \"' + $env:VER + '\"') | & doxygen -"
+goto :eof
+
+:clean
+if exist build rmdir /s /q build
+if exist docs\\html rmdir /s /q docs\\html
+if exist docs\\latex rmdir /s /q docs\\latex
+if exist docs\\xml rmdir /s /q docs\\xml
+if exist compile_commands.json del /f /q compile_commands.json
+if exist "%EXE_NAME%" del /f /q "%EXE_NAME%"
+if exist tags del /f /q tags
+if exist TAGS del /f /q TAGS
+goto :eof
+{tags_block}"""
 
 
 def _readme(ctx: _Context) -> str:
@@ -965,8 +1229,10 @@ def _readme(ctx: _Context) -> str:
         else ""
     )
     sample_note = (
-        "\nDefault library surface is the **version** component (`0.1.0`) with "
-        "CLI `--version` / `-V`, unit tests, and a small benchmark. Add real "
+        "\nDefault library surface is the **version** component driven by the "
+        "root **`VERSION`** file (single source of truth) with CLI "
+        "`--version` / `-V`, unit tests, and a small benchmark. Bump "
+        "`VERSION` only — CMake regenerates the version API. Add real "
         "features as new components under `src/<component>/`.\n"
     )
     gha_section = ""
@@ -981,6 +1247,7 @@ GitHub Actions workflows (default; disable with `cppboot --no-github-actions`):
 |----------|------|---------|
 | **CI** | `.github/workflows/ci.yml` | Ubuntu/macOS/Windows × Debug+Release, tests, benches, artifacts |
 | **Sanitizers** | `.github/workflows/sanitizers.yml` | Linux ASan+UBSan build + `ctest` (failures fail the job) |
+| **Release** | `.github/workflows/release.yml` | Tag `v*` or manual dispatch → notes + zip assets |
 
 **CI** (each OS):
 
@@ -1003,7 +1270,8 @@ Examples: `myproj-linux-x86_64-debug-0.1.0.zip`,
 `myproj-windows-x86_64-release-0.1.0.zip`.
 
 Each zip contains the contents of `build/<config>/bin/` (app, tests, benches).
-Version is read from `./<app> --version` when available (default `0.1.0`).
+Version comes from the root **`VERSION`** file (also what `./<app> --version`
+prints after configure).
 
 **Sanitizers** (Ubuntu + Clang): configure with
 `-{ctx.macro}_ENABLE_SANITIZERS=ON`, build, run tests with
@@ -1011,8 +1279,23 @@ Version is read from `./<app> --version` when available (default `0.1.0`).
 
 Locally on Linux: `make sanitizer` (same flags and env).
 
+### Creating a release
+
+The root **`VERSION`** file is the only place to bump the package version.
+
+1. Edit **`VERSION`** (e.g. `1.0.0`), commit, and merge to the default branch.
+2. Either:
+   - **Tag:** `git tag -a v1.0.0 -m v1.0.0 && git push origin v1.0.0`
+     (tag **must** match `VERSION`), or
+   - **Actions → Release → Run workflow** — leave the version input empty to
+     use `VERSION`, or pass the same semver (mismatch fails the job).
+3. The Release workflow builds **Release** on Linux/macOS/Windows, verifies the
+   binary `--version` matches `VERSION`/tag, generates notes, and uploads zips
+   named `<app>-<os>-<arch>-release-<version>.zip`.
+
 Action pins use current stable majors (`actions/checkout@v7`,
-`actions/upload-artifact@v7`, `lukka/get-cmake@latest` with latest CMake/Ninja).
+`actions/upload-artifact@v7`, `actions/download-artifact@v7`,
+`lukka/get-cmake@latest`, `softprops/action-gh-release@v3`).
 """
     codespaces_section = ""
     if ctx.with_codespaces:
@@ -1133,14 +1416,16 @@ cmake -S . -B build/debug \\
 
 ```text
 {ctx.name}/
+  VERSION              # single source of truth for package version
   src/main.cpp         # THE program entrypoint (always here)
   src/<component>/     # library implementation; each dir has CMakeLists.txt
-  include/             # public headers (classic layout only)
+  include/             # public headers (classic layout only; version.hpp is generated)
   tests/<component>/   # GoogleTest / GoogleMock
   benchmarks/<component>/
-  cmake/               # shared CMake modules
+  cmake/               # shared CMake modules + version.*.in templates
   CMakeLists.txt
-  Makefile
+  Makefile             # macOS / Linux day-to-day targets
+  build.bat            # Windows day-to-day targets (mirrors Makefile)
 ```
 
 {modules_note}
@@ -1151,29 +1436,53 @@ compiler with module dependency scanning (**Clang 16+**, **GCC 14+**, or
 **MSVC 17.4+**). Stock **AppleClang** often cannot scan modules for CMake yet;
 use a recent LLVM Clang/GCC/MSVC when building a modules project.
 {vim_note}{vscode_note}{ctags_note}
+## Versioning
+
+Package version lives in the root **`VERSION`** file (one line, e.g. `0.1.0`).
+
+| Consumer | How it gets the version |
+|----------|-------------------------|
+| CMake `project(... VERSION ...)` | Reads `VERSION` at configure time |
+| `{ctx.namespace}::Version()` / CLI `--version` | Generated from `cmake/version.*.in` |
+| GitHub Release workflow | Requires tag / dispatch input to match `VERSION` |
+| Doxygen `PROJECT_NUMBER` | Injected from `VERSION` by `make doc` / `build.bat doc` |
+
+**To ship a new version:** edit `VERSION` only, commit, then tag `vX.Y.Z` (or
+run the Release workflow). Do not hand-edit generated version sources under the
+build tree.
+
 ## Build
 
 Out-of-source builds only. Artifacts land under `build/`.
 
-| Command | Meaning |
-|---------|---------|
-| `make` / `make debug` | Configure and build **Debug** (no optimization, debug symbols) |
-| `make release` | Configure and build **Release** (optimized; strip symbols when possible) |
+| Command (Unix) | Command (Windows) | Meaning |
+|----------------|-------------------|---------|
+| `make` / `make debug` | `build.bat` / `build.bat debug` | Configure and build **Debug** |
+| `make release` | `build.bat release` | Configure and build **Release** |
+| `make test` | `build.bat test` | Unit tests (Debug) |
+| `make bench` | `build.bat bench` | Microbenchmarks (Release) |
+| `make fmt` | `build.bat fmt` | clang-format |
+| `make doc` | `build.bat doc` | Doxygen HTML |
+| `make clean` | `build.bat clean` | Remove build trees |
 
 Debug tree: `build/debug`  
 Release tree: `build/release`
 
-The Debug configure step links `compile_commands.json` at the repo root for LSP.
+The Debug configure step links/copies `compile_commands.json` at the repo root for LSP.
 
-### Windows note
+### Windows
 
-The Makefile is the happy path on macOS/Linux. On Windows, either use a Unix-like
-environment (MSYS2, WSL) or invoke CMake directly:
+Prefer **`build.bat`** (same targets as the Makefile). Open a **Developer
+Command Prompt for VS** or ensure `cmake` (and ideally `ninja`) are on `PATH`:
 
 ```bat
-cmake -S . -B build/debug -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
-cmake --build build/debug
+build.bat
+build.bat test
+build.bat release
+build.bat help
 ```
+
+WSL / MSYS2 can keep using `make` if you prefer.
 
 ## Run the app
 
@@ -1360,22 +1669,22 @@ documented reason. See `cmake/Dependencies.cmake` for pinned tags.
 
 ## Tooling workflow
 
-Prefer the Makefile wrappers:
+Prefer the Makefile (Unix) or `build.bat` (Windows) wrappers:
 
-| Goal | Command |
-|------|---------|
-| Debug build | `make` / `make debug` |
-| Release build | `make release` |
-| Unit tests | `make test` |
-| Benchmarks | `make bench` |
-| ASan+UBSan (Linux) | `make sanitizer` |
-| Format | `make fmt` |
-| API docs | `make doc` |
-| ctags index | `make tags` (if enabled) |
-| Clean | `make clean` |
+| Goal | Unix | Windows |
+|------|------|---------|
+| Debug build | `make` / `make debug` | `build.bat` / `build.bat debug` |
+| Release build | `make release` | `build.bat release` |
+| Unit tests | `make test` | `build.bat test` |
+| Benchmarks | `make bench` | `build.bat bench` |
+| ASan+UBSan (Linux) | `make sanitizer` | n/a (use Linux/CI) |
+| Format | `make fmt` | `build.bat fmt` |
+| API docs | `make doc` | `build.bat doc` |
+| ctags index | `make tags` (if enabled) | `build.bat tags` |
+| Clean | `make clean` | `build.bat clean` |
 
 - Builds are **out-of-source** under `build/`.
-- After `make debug`, `compile_commands.json` at the repo root supports clangd/LSP.
+- After a Debug configure, `compile_commands.json` at the repo root supports clangd/LSP.
 - **Warnings are errors.** Fix warnings; do not silence them without strong reason.
 - If present, `.ctags` + `make tags` produce a repo-root `tags` file for editors
   (Universal Ctags recommended).
@@ -1383,10 +1692,14 @@ Prefer the Makefile wrappers:
   Release, tests, benchmarks on Linux/macOS/Windows). Keep it green.
 - If present, `.github/workflows/sanitizers.yml` runs ASan+UBSan on Linux;
   treat sanitizer failures as bugs. Locally: `make sanitizer`.
+- **Version:** edit the root **`VERSION`** file only. CMake generates
+  `{ctx.namespace}::Version()` / CLI `--version` from `cmake/version.*.in`.
+  Ship releases with annotated tags `vX.Y.Z` matching `VERSION` (or
+  workflow_dispatch); the release job fails on mismatch.
 - If present, `.devcontainer/` enables **GitHub Codespaces** / Dev Containers
   (browser or local VS Code in a C++ toolchain container).
-- Default library API includes **`Version()`** (semver string, default `0.1.0`)
-  and the app exposes **`--version` / `-V`** via CLI11.
+- Default library API includes **`Version()`** (from `VERSION`) and the app
+  exposes **`--version` / `-V`** via CLI11.
 - Mechanical formatting is enforced by **clang-format** via the checked-in
   `.clang-format` (**Microsoft** style). Run `make fmt`.
 - **Logic, naming, API design, and code organization** follow the
@@ -2011,7 +2324,9 @@ jobs:
 
       - name: Enable MSVC developer command prompt
         if: runner.os == 'Windows'
-        uses: ilammy/msvc-dev-cmd@v1
+        uses: TheMrMilchmann/setup-msvc-dev@v4
+        with:
+          arch: x64
 
       - name: Configure Debug
         run: >
@@ -2235,6 +2550,447 @@ jobs:
 """
 
 
+def _github_actions_release_workflow(ctx: _Context) -> str:
+    """Tag / dispatch release: matrix Release builds, notes, zip assets."""
+    return f"""\
+# Generated by cppboot (default; --no-github-actions to skip)
+# Create GitHub Releases from v* tags or workflow_dispatch.
+# Version source of truth is the root VERSION file (must match tag / input).
+# Attaches <app>-<os>-<arch>-release-<version>.zip and auto-generated notes.
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Semver without leading v (must match VERSION file; leave empty to use VERSION)"
+        required: false
+        type: string
+        default: ""
+      prerelease:
+        description: "Mark as prerelease"
+        required: false
+        type: boolean
+        default: false
+      dry_run:
+        description: "Build and draft only (do not publish release)"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{{{ github.ref }}}}-${{{{ github.event_name }}}}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Resolve version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{{{ steps.meta.outputs.version }}}}
+      tag: ${{{{ steps.meta.outputs.tag }}}}
+      prerelease: ${{{{ steps.meta.outputs.prerelease }}}}
+      dry_run: ${{{{ steps.meta.outputs.dry_run }}}}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Resolve tag and version (synced with VERSION file)
+        id: meta
+        env:
+          INPUT_VERSION: ${{{{ github.event.inputs.version || '' }}}}
+          INPUT_PRERELEASE: ${{{{ github.event.inputs.prerelease || 'false' }}}}
+          INPUT_DRY_RUN: ${{{{ github.event.inputs.dry_run || 'false' }}}}
+        run: |
+          set -euo pipefail
+          if [ ! -f VERSION ]; then
+            echo "Missing VERSION file at repo root (single source of truth)."
+            exit 1
+          fi
+          FILE_VERSION="$(tr -d '[:space:]' < VERSION | sed 's/^v//;s/^V//;s/#.*//')"
+          if ! [[ "${{FILE_VERSION}}" =~ ^[0-9]+\\.[0-9]+\\.[0-9]+([.-].*)?$ ]]; then
+            echo "Invalid VERSION file contents: '${{FILE_VERSION}}' (expected semver like 1.0.0)"
+            exit 1
+          fi
+
+          if [ "${{{{ github.event_name }}}}" = "workflow_dispatch" ]; then
+            if [ -z "${{INPUT_VERSION}}" ]; then
+              VERSION="${{FILE_VERSION}}"
+            else
+              VERSION="${{INPUT_VERSION#v}}"
+              VERSION="${{VERSION#V}}"
+            fi
+            if [ "${{VERSION}}" != "${{FILE_VERSION}}" ]; then
+              echo "Release version '${{VERSION}}' does not match VERSION file '${{FILE_VERSION}}'."
+              echo "Bump the VERSION file (and only that file), commit, then re-run the release."
+              exit 1
+            fi
+            TAG="v${{VERSION}}"
+            PRERELEASE="${{INPUT_PRERELEASE}}"
+            DRY_RUN="${{INPUT_DRY_RUN}}"
+            # Do not push tags here — that would re-trigger this workflow.
+            # softprops/action-gh-release creates the tag on publish when missing.
+          else
+            TAG="${{{{ github.ref_name }}}}"
+            VERSION="${{TAG#v}}"
+            VERSION="${{VERSION#V}}"
+            PRERELEASE=false
+            DRY_RUN=false
+            if [[ "${{TAG}}" == *-* ]] || [[ "${{TAG}}" == *alpha* ]] || [[ "${{TAG}}" == *beta* ]] || [[ "${{TAG}}" == *rc* ]]; then
+              PRERELEASE=true
+            fi
+            if [ "${{VERSION}}" != "${{FILE_VERSION}}" ]; then
+              echo "Tag version '${{VERSION}}' does not match VERSION file '${{FILE_VERSION}}'."
+              echo "Bump VERSION, commit, then tag v${{FILE_VERSION}} (or retag after fixing VERSION)."
+              exit 1
+            fi
+          fi
+          {{
+            echo "version=${{VERSION}}"
+            echo "tag=${{TAG}}"
+            echo "prerelease=${{PRERELEASE}}"
+            echo "dry_run=${{DRY_RUN}}"
+          }} >> "${{{{ github.output }}}}"
+          echo "Resolved release ${{TAG}} (version=${{VERSION}}, file=${{FILE_VERSION}}, prerelease=${{PRERELEASE}}, dry_run=${{DRY_RUN}})"
+
+  build:
+    name: build-${{{{ matrix.os }}}}
+    needs: prepare
+    runs-on: ${{{{ matrix.os }}}}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+          - windows-latest
+    env:
+      APP_NAME: {ctx.name}
+      RELEASE_VERSION: ${{{{ needs.prepare.outputs.version }}}}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install latest CMake and Ninja
+        uses: lukka/get-cmake@latest
+        with:
+          cmakeVersion: latest
+          ninjaVersion: latest
+
+      - name: Enable MSVC developer command prompt
+        if: runner.os == 'Windows'
+        uses: TheMrMilchmann/setup-msvc-dev@v4
+        with:
+          arch: x64
+
+      - name: Configure Release
+        run: >
+          cmake -S . -B build/release -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build Release
+        run: cmake --build build/release --parallel
+
+      - name: Test Release
+        run: ctest --test-dir build/release --output-on-failure --parallel
+
+      - name: Verify binary version matches release
+        run: |
+          set -euo pipefail
+          bin="build/release/bin/${{APP_NAME}}"
+          if [ ! -x "${{bin}}" ] && [ -f "${{bin}}.exe" ]; then
+            bin="${{bin}}.exe"
+          fi
+          if [ ! -f "${{bin}}" ]; then
+            echo "Missing app binary at build/release/bin/${{APP_NAME}}"
+            exit 1
+          fi
+          out="$("${{bin}}" --version 2>&1 || true)"
+          echo "Binary --version output: ${{out}}"
+          if ! echo "${{out}}" | grep -Eq "(^|[[:space:]])${{RELEASE_VERSION}}([[:space:]]|$)"; then
+            echo "Version mismatch: expected ${{RELEASE_VERSION}} from VERSION/tag, got: ${{out}}"
+            echo "Edit the root VERSION file only, reconfigure/rebuild, then release."
+            exit 1
+          fi
+          file_ver="$(tr -d '[:space:]' < VERSION | sed 's/^v//;s/^V//;s/#.*//')"
+          if [ "${{file_ver}}" != "${{RELEASE_VERSION}}" ]; then
+            echo "VERSION file (${{file_ver}}) drifted from release version (${{RELEASE_VERSION}})."
+            exit 1
+          fi
+
+      - name: Package Release zip
+        id: pkg
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os, re, shutil, subprocess
+          from pathlib import Path
+
+          app = os.environ["APP_NAME"]
+          version = os.environ["RELEASE_VERSION"]
+          os_name = {{"Linux": "linux", "macOS": "macos", "Windows": "windows"}}.get(
+              os.environ.get("RUNNER_OS", ""), os.environ.get("RUNNER_OS", "unknown").lower()
+          )
+          arch = {{"X64": "x86_64", "ARM64": "arm64", "X86": "x86"}}.get(
+              os.environ.get("RUNNER_ARCH", ""), os.environ.get("RUNNER_ARCH", "unknown").lower()
+          )
+          config = "release"
+          bin_dir = Path("build") / config / "bin"
+          stem = f"{{app}}-{{os_name}}-{{arch}}-{{config}}-{{version}}"
+          staging = Path("dist") / stem
+          if staging.exists():
+              shutil.rmtree(staging)
+          staging.mkdir(parents=True)
+          if not bin_dir.is_dir():
+              raise SystemExit(f"missing {{bin_dir}}")
+          for p in bin_dir.iterdir():
+              dest = staging / p.name
+              if p.is_file():
+                  shutil.copy2(p, dest)
+              elif p.is_dir():
+                  shutil.copytree(p, dest)
+          archive = shutil.make_archive(str(Path("dist") / stem), "zip", root_dir="dist", base_dir=stem)
+          print(f"Created {{archive}}")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
+              fh.write(f"artifact_name={{stem}}\\n")
+              fh.write(f"artifact_path={{archive}}\\n")
+          PY
+
+      - name: Upload Release zip (workflow artifact)
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{{{ steps.pkg.outputs.artifact_name }}}}
+          path: ${{{{ steps.pkg.outputs.artifact_path }}}}
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    name: Publish GitHub Release
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Download build zips
+        uses: actions/download-artifact@v7
+        with:
+          path: release-assets
+          pattern: "{ctx.name}-*"
+          merge-multiple: true
+
+      - name: List assets
+        run: |
+          set -euo pipefail
+          find release-assets -type f -name '*.zip' | tee assets.list
+          test -s assets.list
+
+      - name: Create GitHub Release
+        if: needs.prepare.outputs.dry_run != 'true'
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{{{ needs.prepare.outputs.tag }}}}
+          name: ${{{{ needs.prepare.outputs.tag }}}}
+          generate_release_notes: true
+          prerelease: ${{{{ needs.prepare.outputs.prerelease == 'true' }}}}
+          files: release-assets/**/*.zip
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{{{ secrets.GITHUB_TOKEN }}}}
+
+      - name: Dry-run summary
+        if: needs.prepare.outputs.dry_run == 'true'
+        run: |
+          echo "Dry run complete for ${{{{ needs.prepare.outputs.tag }}}} — assets:"
+          find release-assets -type f -name '*.zip' -print
+"""
+
+
+def _code_of_conduct_md() -> str:
+    """Short, technology-first code of conduct (not Contributor Covenant)."""
+    return """\
+# Code of Conduct
+
+This project is a technical collaboration space. The standard is simple:
+**be an adult, be respectful, and keep the work about the work.**
+
+## Principles
+
+1. **Treat others as you would want to be treated.** Assume good faith until
+   shown otherwise.
+2. **Be mature and professional.** Disagreement is fine; contempt is not.
+3. **Focus on the technology.** Prefer technical arguments, evidence, and
+   clear tradeoffs over personal attacks, tribal signaling, or off-topic
+   politics.
+4. **Be direct and civil.** Critique ideas and code, not people. Avoid sarcasm
+   that exists only to belittle.
+5. **Be responsible.** Own mistakes, fix what you break, and do not waste
+   others' time with spam, trolling, or bad-faith engagement.
+6. **Respect privacy and safety.** Do not share private information without
+   consent. Do not threaten, stalk, or harass anyone.
+
+## What this is not
+
+This is not a speech code about identity, ideology, or belief. Contributors of
+any background are welcome on equal terms: the bar is competence, honesty, and
+conduct.
+
+## Unacceptable behavior
+
+- Harassment, intimidation, or sustained personal attacks
+- Doxxing or publishing private information without consent
+- Sexual advances or sexualized content in project spaces
+- Spam, vandalism, or deliberate disruption
+- Using the project primarily as a vehicle for unrelated political agitation
+
+## Scope
+
+These expectations apply in project spaces: issues, pull requests, discussions,
+chats tied to the project, and similar venues when acting as a participant in
+this project.
+
+## Enforcement
+
+Maintainers may warn, moderate, block, or remove contributions that violate
+this standard. Serious or repeated abuse may result in a temporary or permanent
+ban from project spaces.
+
+Report problems privately to a maintainer (see the repository owner/maintainers,
+or [SECURITY.md](SECURITY.md) for security-sensitive matters). Do not file public
+issues solely to air personal grievances.
+
+## In one line
+
+**Be excellent to each other; ship good software.**
+"""
+
+
+def _contributing_md(ctx: _Context) -> str:
+    return f"""\
+# Contributing to {ctx.name}
+
+Thank you for considering a contribution. This guide is intentionally generic
+and works for most open-source C++ projects bootstrapped with cppboot.
+
+## Code of conduct
+
+Be mature, respectful, and technical. See [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
+
+## Getting started
+
+1. Fork the repository and clone your fork.
+2. Install a C++20 toolchain, CMake 3.20+, Ninja (recommended), and Make.
+3. Build and test:
+
+   ```bash
+   make
+   make test
+   ./{ctx.name} --version
+   ```
+
+4. Optional: open the folder in VS Code and install recommended extensions
+   (see README).
+
+## Development workflow
+
+- Prefer small, focused pull requests.
+- Follow [AGENTS.md](AGENTS.md) for layout, style, and documentation rules:
+  - **Google C++ Style Guide** for code logic and naming
+  - **Microsoft** `.clang-format` for formatting (`make fmt`)
+- List new sources explicitly in the component `CMakeLists.txt` (no globs).
+- Add or update unit tests for behavior changes.
+- Keep `make` and `make test` green. On Linux, `make sanitizer` is encouraged
+  for memory/UB issues.
+
+## Reporting bugs and proposing features
+
+- Use GitHub Issues for bugs and feature requests.
+- Include OS, compiler, CMake version, and steps to reproduce when filing bugs.
+- Search existing issues before opening a new one.
+
+## Security vulnerabilities
+
+Do **not** open a public issue for security problems. See
+[SECURITY.md](SECURITY.md).
+
+## Pull request checklist
+
+- [ ] Code builds (`make`)
+- [ ] Tests pass (`make test`)
+- [ ] Formatted (`make fmt`)
+- [ ] Public APIs have Doxygen where appropriate
+- [ ] Commit messages are clear; PR description explains *why*
+
+## License
+
+By contributing, you agree that your contributions will be licensed under the
+same license as this repository (see [LICENSE](LICENSE)).
+"""
+
+
+def _security_md(ctx: _Context) -> str:
+    return f"""\
+# Security Policy
+
+## Supported versions and fix policy
+
+**{ctx.name}** treats security seriously, with a simple support model:
+
+- Security fixes are developed on the default branch and **ship in the next
+  release** (or sooner via an out-of-band release if warranted).
+- **We do not backport security fixes to older releases by default.**
+- Exceptions may be made for **compelling reasons** (for example, a widely used
+  previous release with a severe issue and a clear maintainer commitment). Any
+  such exception is discretionary and will be called out in release notes.
+
+| Line | Security fixes |
+|------|----------------|
+| Default branch (development) | Yes — fixed here first |
+| Next / upcoming release | Yes — normal ship vehicle for fixes |
+| Older released versions | **No** (unless an explicit exception) |
+
+Always prefer upgrading to the latest release when a security fix is announced.
+
+## Reporting a vulnerability
+
+Please **do not** open a public GitHub issue for security vulnerabilities.
+
+Prefer one of these private channels (first that applies):
+
+1. **GitHub Private Vulnerability Reporting** (Security tab → Advisories →
+   Report a vulnerability), if enabled on this repository.
+2. Contact a repository maintainer privately (see the owner/maintainer profile
+   or organization security contact).
+
+Include:
+
+- A description of the issue and its impact
+- Steps to reproduce or a proof of concept if available
+- Affected versions / commit SHAs if known
+
+We will acknowledge receipt when possible and work with you on a coordinated
+disclosure timeline. Please give maintainers reasonable time to investigate and
+ship a fix (typically via the next release) before any public discussion.
+
+## Preferred languages
+
+English is preferred for security reports.
+"""
+
+
 def _gitignore() -> str:
     return """\
 # Build trees
@@ -2339,6 +3095,8 @@ CompileFlags:
 def _doxyfile(ctx: _Context) -> str:
     return f"""\
 # Doxyfile generated by cppboot — minimal professional defaults.
+# PROJECT_NUMBER is overridden from the root VERSION file by `make doc` /
+# `build.bat doc`; the value below is only a fallback.
 PROJECT_NAME           = "{ctx.name}"
 PROJECT_NUMBER         = "0.1.0"
 OUTPUT_DIRECTORY       = docs
@@ -2461,28 +3219,34 @@ nnoremap <leader>f :make fmt<CR>
 
 
 
-def _version_header(ctx: _Context) -> str:
-    return f"""\
+def _version_file() -> str:
+    """Single source of truth for package version (edit this file only)."""
+    return "0.1.0\n"
+
+
+def _version_header_in(ctx: _Context) -> str:
+    """CMake configure_file template for the public version header."""
+    _ = ctx
+    return """\
 #pragma once
 
 #include <string_view>
 
 /**
  * @file version.hpp
- * @brief Package version API for {ctx.name}.
+ * @brief Package version API (generated from VERSION + cmake/version.hpp.in).
  *
- * Keep the reported version in sync with the CMake `project(... VERSION ...)`
- * value (default 0.1.0).
+ * Do not edit this file by hand. Change the root VERSION file and reconfigure.
  */
 
-namespace {ctx.namespace} {{
+namespace @PROJECT_NAMESPACE@ {
 
 /// Semantic version major component.
-inline constexpr int kVersionMajor = 0;
+inline constexpr int kVersionMajor = @PROJECT_VERSION_MAJOR@;
 /// Semantic version minor component.
-inline constexpr int kVersionMinor = 1;
+inline constexpr int kVersionMinor = @PROJECT_VERSION_MINOR@;
 /// Semantic version patch component.
-inline constexpr int kVersionPatch = 0;
+inline constexpr int kVersionPatch = @PROJECT_VERSION_PATCH@;
 
 /**
  * @brief Returns the package version string (semantic version).
@@ -2490,29 +3254,34 @@ inline constexpr int kVersionPatch = 0;
  */
 [[nodiscard]] std::string_view Version() noexcept;
 
-}}  // namespace {ctx.namespace}
+}  // namespace @PROJECT_NAMESPACE@
 """
 
 
-def _version_source(ctx: _Context) -> str:
-    return f"""\
-#include "{ctx.namespace}/version.hpp"
+def _version_source_in(ctx: _Context) -> str:
+    """CMake configure_file template for the version translation unit."""
+    _ = ctx
+    return """\
+#include "@PROJECT_NAMESPACE@/version.hpp"
 
-namespace {ctx.namespace} {{
+namespace @PROJECT_NAMESPACE@ {
 
-std::string_view Version() noexcept {{
-  return "0.1.0";
-}}
+std::string_view Version() noexcept {
+  return "@PROJECT_VERSION_STRING@";
+}
 
-}}  // namespace {ctx.namespace}
+}  // namespace @PROJECT_NAMESPACE@
 """
 
 
-def _version_module(ctx: _Context) -> str:
+def _version_module_in(ctx: _Context) -> str:
+    """CMake configure_file template for the C++20 version module."""
     return f"""\
 /**
  * @file version.cppm
- * @brief C++20 module interface for the package version API.
+ * @brief C++20 module interface for the package version API (generated).
+ *
+ * Do not edit this file by hand. Change the root VERSION file and reconfigure.
  */
 
 module;
@@ -2526,9 +3295,9 @@ export module {ctx.namespace}.version;
  */
 export namespace {ctx.namespace} {{
 
-inline constexpr int kVersionMajor = 0;
-inline constexpr int kVersionMinor = 1;
-inline constexpr int kVersionPatch = 0;
+inline constexpr int kVersionMajor = @PROJECT_VERSION_MAJOR@;
+inline constexpr int kVersionMinor = @PROJECT_VERSION_MINOR@;
+inline constexpr int kVersionPatch = @PROJECT_VERSION_PATCH@;
 
 [[nodiscard]] std::string_view Version() noexcept;
 
@@ -2537,7 +3306,7 @@ inline constexpr int kVersionPatch = 0;
 namespace {ctx.namespace} {{
 
 std::string_view Version() noexcept {{
-  return "0.1.0";
+  return "@PROJECT_VERSION_STRING@";
 }}
 
 }}  // namespace {ctx.namespace}
@@ -2598,6 +3367,7 @@ def _version_test(ctx: _Context) -> str:
 
 {includes}
 
+#include <string>
 #include <string_view>
 
 namespace {{
@@ -2607,16 +3377,21 @@ TEST(VersionTest, IsNonEmpty) {{
   EXPECT_FALSE(version.empty());
 }}
 
-TEST(VersionTest, MatchesDefaultSemver) {{
-  EXPECT_EQ({ctx.namespace}::Version(), "0.1.0");
-  EXPECT_EQ({ctx.namespace}::kVersionMajor, 0);
-  EXPECT_EQ({ctx.namespace}::kVersionMinor, 1);
-  EXPECT_EQ({ctx.namespace}::kVersionPatch, 0);
+TEST(VersionTest, MatchesComponentConstants) {{
+  // Version() is generated from the root VERSION file; constants must agree.
+  const std::string expected =
+      std::to_string({ctx.namespace}::kVersionMajor) + "." +
+      std::to_string({ctx.namespace}::kVersionMinor) + "." +
+      std::to_string({ctx.namespace}::kVersionPatch);
+  EXPECT_EQ({ctx.namespace}::Version(), expected);
+  EXPECT_GE({ctx.namespace}::kVersionMajor, 0);
+  EXPECT_GE({ctx.namespace}::kVersionMinor, 0);
+  EXPECT_GE({ctx.namespace}::kVersionPatch, 0);
 }}
 
 TEST(VersionTest, HasThreeNumericComponents) {{
   const std::string_view version = {ctx.namespace}::Version();
-  EXPECT_EQ(version.find('.'), 1U);
+  EXPECT_NE(version.find('.'), std::string_view::npos);
   EXPECT_NE(version.rfind('.'), std::string_view::npos);
   EXPECT_NE(version.find('.'), version.rfind('.'));
 }}

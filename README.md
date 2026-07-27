@@ -19,7 +19,8 @@ cppboot -n myproj --no-vscode --no-vim --no-github-actions --no-ctags
 cppboot -n myproj --github   # opt-in: create remote with gh
 ```
 
-Every project includes a **version** library API (`0.1.0`) and CLI **`--version` / `-V`**.
+Every project includes a **version** library API driven by a root **`VERSION`**
+file (single source of truth) and CLI **`--version` / `-V`**.
 
 ### Options
 
@@ -42,7 +43,8 @@ Every project includes a **version** library API (`0.1.0`) and CLI **`--version`
 
 ## What you get
 
-- CMake (C++20) + GNU Makefile wrappers + `CMakePresets.json`
+- CMake (C++20) + GNU Makefile + Windows **`build.bat`** + `CMakePresets.json`
+- Root **`VERSION`** file → CMake / `--version` / release workflow stay in sync
 - Default **version** component + app CLI `--version` + tests + benchmark
 - Library + app + GoogleTest + Google Benchmark
 - Default app deps (FetchContent, ON): **CLI11**, **nlohmann/json**, **spdlog**
@@ -54,6 +56,8 @@ Every project includes a **version** library API (`0.1.0`) and CLI **`--version`
 - **Default OFF:** `--github` remote creation
 - After scaffolding: runs **`make fmt`**, then **`git init` + add + initial commit**
 - `README.md`, `AGENTS.md`
+- Repo-local **CODE_OF_CONDUCT.md** (short, technology-first), **CONTRIBUTING.md**,
+  **SECURITY.md** (override GitHub user/org default community files)
 
 ## Post-bootstrap state
 
