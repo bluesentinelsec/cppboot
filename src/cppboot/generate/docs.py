@@ -259,6 +259,57 @@ Package version lives in the root **`VERSION`** file (one line, e.g. `0.1.0`).
 run the Release workflow). Do not hand-edit generated version sources under the
 build tree.
 
+## Using this library from another CMake project
+
+The library target is **`{ctx.name}::lib`** (also **`{ctx.name}::{ctx.target}`**).
+
+When this repo is **not** the top-level CMake project (via `add_subdirectory` or
+`FetchContent`), app/tests/benchmarks and optional app deps default **off** so
+you only build the library.
+
+### `add_subdirectory`
+
+```cmake
+add_subdirectory(path/to/{ctx.name})
+target_link_libraries(my_app PRIVATE {ctx.name}::lib)
+```
+
+### `FetchContent` (e.g. from GitHub)
+
+```cmake
+include(FetchContent)
+FetchContent_Declare(
+  {ctx.name}
+  GIT_REPOSITORY https://github.com/<org>/{ctx.name}.git
+  GIT_TAG        v0.1.0   # or main / a commit SHA
+  GIT_SHALLOW    TRUE
+)
+FetchContent_MakeAvailable({ctx.name})
+target_link_libraries(my_app PRIVATE {ctx.name}::lib)
+```
+
+Optional cache variables (prefix `{ctx.macro}_`):
+
+| Option | Default (top-level / embedded) | Meaning |
+|--------|----------------------------------|---------|
+| `{ctx.macro}_BUILD_APP` | ON / OFF | Demo executable |
+| `{ctx.macro}_BUILD_TESTS` | ON / OFF | GoogleTest suite |
+| `{ctx.macro}_BUILD_BENCHMARKS` | ON / OFF | Google Benchmark |
+| `{ctx.macro}_WITH_CLI11` | ON / OFF | CLI11 |
+| `{ctx.macro}_WITH_JSON` | ON / OFF | nlohmann/json |
+| `{ctx.macro}_WITH_SPDLOG` | ON / OFF | spdlog |
+
+### `find_package` (after install)
+
+```bash
+cmake --install build/release --prefix /path/to/prefix
+```
+
+```cmake
+find_package({ctx.name} REQUIRED CONFIG)
+target_link_libraries(my_app PRIVATE {ctx.name}::lib)
+```
+
 ## Build
 
 Out-of-source builds only. Artifacts land under `build/`.

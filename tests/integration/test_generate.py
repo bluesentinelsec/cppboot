@@ -139,6 +139,32 @@ def test_shared_library(tmp_root: Path) -> None:
     assert "SHARED" in cmake
 
 
+def test_cmake_is_consumable_as_dependency(tmp_root: Path) -> None:
+    """Generated projects support add_subdirectory / FetchContent / find_package."""
+    opts = minimal_options("pkgdemo", tmp_root)
+    generate_project(opts)
+    root = tmp_root / "pkgdemo"
+    cmake = (root / "CMakeLists.txt").read_text(encoding="utf-8")
+    assert "IS_TOP_LEVEL" in cmake
+    assert "BUILD_APP" in cmake
+    assert f"{opts.name.upper().replace('-', '_')}_IS_TOP_LEVEL" in cmake or "IS_TOP_LEVEL" in cmake
+    assert "add_library(${PROJECT_NAME}::lib ALIAS" in cmake
+    assert "configure_package_config_file" in cmake
+    assert "install(EXPORT" in cmake
+    config_in = root / "cmake" / "pkgdemoConfig.cmake.in"
+    assert config_in.is_file()
+    assert "pkgdemoTargets.cmake" in config_in.read_text(encoding="utf-8")
+    deps = (root / "cmake" / "Dependencies.cmake").read_text(encoding="utf-8")
+    assert "if(PKGDEMO_BUILD_TESTS)" in deps or "BUILD_TESTS)" in deps
+    assert "if(PKGDEMO_BUILD_BENCHMARKS)" in deps or "BUILD_BENCHMARKS)" in deps
+    readme = (root / "README.md").read_text(encoding="utf-8")
+    assert "FetchContent" in readme
+    assert "add_subdirectory" in readme
+    assert "find_package" in readme
+    src_cmake = (root / "src" / "CMakeLists.txt").read_text(encoding="utf-8")
+    assert "BUILD_APP" in src_cmake
+
+
 def test_nonempty_destination_raises(tmp_root: Path) -> None:
     dest = tmp_root / "exists"
     dest.mkdir()
