@@ -189,9 +189,7 @@ def generate_project(options: ProjectOptions) -> GenerateResult:
         write(".devcontainer/setup.sh", _devcontainer_setup_sh(ctx))
         setup_sh = project_dir / ".devcontainer" / "setup.sh"
         setup_sh.chmod(setup_sh.stat().st_mode | 0o111)
-        logger.info(
-            "wrote GitHub Codespaces / Dev Container config under .devcontainer/"
-        )
+        logger.info("wrote GitHub Codespaces / Dev Container config under .devcontainer/")
 
     if ctx.with_github_actions:
         write(".github/workflows/ci.yml", _github_actions_workflow(ctx))
@@ -233,4 +231,3 @@ def generate_project(options: ProjectOptions) -> GenerateResult:
         license_source=license_result.source,
         formatted=formatted,
     )
-

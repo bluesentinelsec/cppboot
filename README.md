@@ -79,6 +79,10 @@ Developers can start work with a clean `git status` and predictable formatting.
 ```bash
 python3 -m pip install -e ".[dev]"
 python3 -m pytest -q
+python3 -m ruff check src tests
+python3 -m ruff format --check src tests
+python3 -m mypy
+python3 -m build && python3 -m twine check dist/*
 ```
 
 Tests cover CLI parsing, name/license logic, and filesystem generation with
@@ -91,6 +95,39 @@ Optional full C++ smoke (local only, not required for CI):
 ```bash
 bash scripts/smoke.sh
 ```
+
+### Releasing to PyPI (when ready)
+
+Package version lives in **`src/cppboot/_version.py`** (single source; also used by
+setuptools dynamic version).
+
+1. Bump `__version__` in `_version.py` and update `CHANGELOG.md`
+2. Merge to `main` (CI must be green)
+3. Create a **GitHub Release** with tag **`vX.Y.Z`** matching that version  
+   (GitHub UI: Releases → Draft a new release, or `gh release create vX.Y.Z`)
+4. Workflow **Publish** (`.github/workflows/publish.yml`) runs on
+   `release: published`:
+   - Verifies tag `vX.Y.Z` == package version
+   - Builds sdist + wheel
+   - Uploads to **PyPI** via [Trusted Publishing](https://docs.pypi.org/trusted-publishers/)
+     (OIDC; no long-lived API token in the repo)
+
+Manual dry-run target (does **not** publish to real PyPI unless you choose it):
+
+```bash
+gh workflow run publish.yml -f target=testpypi
+```
+
+**One-time setup before the first real publish** (not automated here):
+
+1. Create the empty project on [PyPI](https://pypi.org/) (or claim `cppboot` on first upload)
+2. Add a **Trusted Publisher**: owner `bluesentinelsec`, repo `cppboot`,
+   workflow `publish.yml`, environment `pypi`
+3. Optionally configure TestPyPI the same way with environment `testpypi`
+4. Create GitHub Environments `pypi` / `testpypi` (optional protection rules)
+
+Until that setup is done, the publish job will fail at the upload step — which is
+expected and safe while developing.
 
 ### Package layout
 

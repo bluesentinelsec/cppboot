@@ -273,7 +273,7 @@ Out-of-source builds only. Artifacts land under `build/`.
 | `make doc` | `build.bat doc` | Doxygen HTML |
 | `make clean` | `build.bat clean` | Remove build trees |
 
-Debug tree: `build/debug`  
+Debug tree: `build/debug`
 Release tree: `build/release`
 
 The Debug configure step links/copies `compile_commands.json` at the repo root for LSP.

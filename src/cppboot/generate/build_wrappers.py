@@ -36,9 +36,7 @@ endif
 """
     if ctx.with_ctags:
         phony_extra = " tags"
-        help_tags = (
-            '\t@echo "  make tags           - regenerate ctags index (Universal Ctags)"\n'
-        )
+        help_tags = '\t@echo "  make tags           - regenerate ctags index (Universal Ctags)"\n'
         tags_target = """
 tags:
 	@command -v ctags >/dev/null 2>&1 || { echo "ctags not found (install universal-ctags)"; exit 1; }

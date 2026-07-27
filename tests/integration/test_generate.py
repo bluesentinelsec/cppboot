@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from cppboot.generator import ProjectOptions, generate_project
+from cppboot.generator import generate_project
 from tests.conftest import minimal_options
 
 

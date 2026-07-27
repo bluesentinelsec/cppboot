@@ -7,7 +7,7 @@ import logging
 import sys
 from pathlib import Path
 
-from cppboot import __version__
+from cppboot._version import __version__
 from cppboot.generator import ProjectOptions, generate_project
 from cppboot.licenses import DEFAULT_LICENSE, LICENSE_CHOICES
 
@@ -70,18 +70,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--vscode",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help=(
-            "Write VS Code config + CMakePresets (default: on). "
-            "Use --no-vscode to skip."
-        ),
+        help=("Write VS Code config + CMakePresets (default: on). Use --no-vscode to skip."),
     )
     parser.add_argument(
         "--github-actions",
         action=argparse.BooleanOptionalAction,
         default=True,
         help=(
-            "Write cross-platform GitHub Actions CI (default: on). "
-            "Use --no-github-actions to skip."
+            "Write cross-platform GitHub Actions CI (default: on). Use --no-github-actions to skip."
         ),
     )
     parser.add_argument(
@@ -106,19 +102,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--git",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help=(
-            "Run git init and create an initial commit (default: on). "
-            "Use --no-git to skip."
-        ),
+        help=("Run git init and create an initial commit (default: on). Use --no-git to skip."),
     )
     parser.add_argument(
         "--fmt",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help=(
-            "Run make fmt after scaffolding (default: on). "
-            "Use --no-fmt to skip."
-        ),
+        help=("Run make fmt after scaffolding (default: on). Use --no-fmt to skip."),
     )
     parser.add_argument(
         "--community-docs",
