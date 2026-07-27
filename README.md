@@ -24,7 +24,7 @@ file (single source of truth) and CLI **`--version` / `-V`**.
 
 ### Options
 
-Requires **Python 3.9+** (including Amazon Linux’s system 3.9).
+Requires **Python 3.9+** (CI: 3.9–3.15; Amazon Linux’s system 3.9 is supported).
 
 | Flag | Default | Description |
 |------|---------|-------------|

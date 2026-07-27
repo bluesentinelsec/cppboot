@@ -9,7 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Official support for **Python 3.9** (`requires-python = ">=3.9"`, CI matrix).
+- Official support for **Python 3.9+** (`requires-python = ">=3.9"`).
+- CI matrix covers **3.9–3.15** (3.15 via `allow-prereleases` while pre-release).
 
 ### Changed
 
