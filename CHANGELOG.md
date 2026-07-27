@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-07-27
+
+### Added
+
+- Generated projects are consumable as CMake dependencies via
+  `add_subdirectory`, `FetchContent`, and `find_package` after install.
+- Top-level vs embed detection (`*_IS_TOP_LEVEL`): when embedded, app,
+  tests, benchmarks, and preferred app deps default off so only the library
+  is built.
+- Package export (`install(EXPORT)` + `*Config.cmake`) and dual library
+  aliases (`::lib` / `::${target}`) for clean consumer linking.
+- Generated README documents the three consumption paths.
+
+### Changed
+
+- Preferred third-party deps (CLI11, nlohmann/json, spdlog) link on the demo
+  app only, not the static library, so install/export does not require
+  FetchContent targets.
+
 ## [0.2.2] - 2026-07-27
 
 ### Changed
