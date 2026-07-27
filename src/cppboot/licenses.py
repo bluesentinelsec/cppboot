@@ -209,10 +209,35 @@ def fetch_license_text(
     year: str,
     holder: str,
     timeout: float = 30.0,
+    offline: bool = False,
 ) -> LicenseResult:
-    """Download license text from an authoritative source, with fallbacks."""
+    """Download license text from an authoritative source, with fallbacks.
+
+    When ``offline`` is True, skip the network and use the built-in fallback
+    bodies (preferred for unit tests and air-gapped runs).
+    """
     license_id = normalize_license_id(license_id)
     url = _LICENSE_URLS[license_id]
+    if offline:
+        fallback = _FALLBACK_BODIES.get(license_id)
+        if fallback is not None:
+            text = fallback.format(year=year, holder=holder)
+            return LicenseResult(
+                license_id=license_id,
+                text=text,
+                source=f"offline-fallback:{license_id}",
+            )
+        # Short stub when no embedded body exists (e.g. GPL/LGPL/MPL).
+        text = (
+            f"{license_id}\n\n"
+            f"Copyright (c) {year} {holder}\n\n"
+            f"See {url} for the full license text.\n"
+        )
+        return LicenseResult(
+            license_id=license_id,
+            text=text,
+            source=f"offline-stub:{license_id}",
+        )
     try:
         body = _download_text(url, timeout=timeout)
         return LicenseResult(license_id=license_id, text=body, source=url)

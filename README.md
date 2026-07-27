@@ -34,12 +34,18 @@ file (single source of truth) and CLI **`--version` / `-V`**.
 | `--vim` / `--no-vim` | **on** | Project-local `.vimrc` |
 | `--ctags` / `--no-ctags` | **on** | Universal Ctags `.ctags` + `make tags` |
 | `--vscode` / `--no-vscode` | **on** | VS Code + `CMakePresets.json` |
-| `--github-actions` / `--no-github-actions` | **on** | Multi-OS CI workflow |
+| `--github-actions` / `--no-github-actions` | **on** | Multi-OS CI / sanitizers / release workflows |
 | `--codespaces` / `--no-codespaces` | **on** | GitHub Codespaces / Dev Container (`.devcontainer/`) |
+| `--community-docs` / `--no-community-docs` | **on** | `CODE_OF_CONDUCT.md`, `CONTRIBUTING.md`, `SECURITY.md` |
+| `--git` / `--no-git` | **on** | `git init` + initial commit |
+| `--fmt` / `--no-fmt` | **on** | Run `make fmt` after scaffolding |
 | `--github` | **off** | Create GitHub remote with `gh` (opt-in) |
+| `--output-dir` | `.` | Parent directory for the new project |
 | `-v`, `--verbose` | off | Verbose logging |
 | `--version` | | Print cppboot version |
 | `-h`, `--help` | | Help |
+
+All default-on features have matching **`--no-*`** opt-outs.
 
 ## What you get
 
@@ -68,7 +74,25 @@ When `make`/`clang-format` and `git` are available, a new project ends with:
 
 Developers can start work with a clean `git status` and predictable formatting.
 
-## Smoke check
+## Development / tests
+
+```bash
+python3 -m pip install -e ".[dev]"
+python3 -m pytest -q
+```
+
+Tests cover CLI parsing, name/license logic, and filesystem generation with
+**offline licenses** and **no network / no `gh`**. Optional markers:
+
+- `@pytest.mark.requires_git` — runs only when `git` is on `PATH`
+
+Optional full C++ smoke (local only, not required for CI):
+
+```bash
+bash scripts/smoke.sh
+```
+
+## Smoke check (generated C++ project)
 
 ```bash
 python3 -m pip install -e .

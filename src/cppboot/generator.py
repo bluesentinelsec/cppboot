@@ -43,7 +43,12 @@ class ProjectOptions:
     with_codespaces: bool = True
     create_github: bool = False
     with_github_actions: bool = True
+    with_git: bool = True
+    with_fmt: bool = True
+    with_community_docs: bool = True
     verbose: bool = False
+    # When True, license text uses offline fallbacks (no network). Prefer for tests.
+    offline_license: bool = False
 
 
 @dataclass
@@ -117,9 +122,10 @@ def generate_project(options: ProjectOptions) -> GenerateResult:
     write("AGENTS.md", _agents_md(ctx))
     # Repo-local community health files override GitHub user/org defaults
     # (e.g. a personal .github repo with company-specific templates).
-    write("CODE_OF_CONDUCT.md", _code_of_conduct_md())
-    write("CONTRIBUTING.md", _contributing_md(ctx))
-    write("SECURITY.md", _security_md(ctx))
+    if options.with_community_docs:
+        write("CODE_OF_CONDUCT.md", _code_of_conduct_md())
+        write("CONTRIBUTING.md", _contributing_md(ctx))
+        write("SECURITY.md", _security_md(ctx))
     write(".gitignore", _gitignore())
     write(".gitattributes", _gitattributes())
     write(".clang-format", _clang_format())
@@ -188,7 +194,12 @@ def generate_project(options: ProjectOptions) -> GenerateResult:
 
     year = ctx.year
     holder = name
-    license_result = fetch_license_text(license_id, year=year, holder=holder)
+    license_result = fetch_license_text(
+        license_id,
+        year=year,
+        holder=holder,
+        offline=options.offline_license,
+    )
     write("LICENSE", license_result.text)
     logger.info(
         "license %s written from %s",
@@ -197,8 +208,12 @@ def generate_project(options: ProjectOptions) -> GenerateResult:
     )
 
     # Format before the initial commit so the tree is in a predictable state.
-    formatted = _run_make_fmt(project_dir)
-    git_ok = _git_init(project_dir)
+    formatted = False
+    if options.with_fmt:
+        formatted = _run_make_fmt(project_dir)
+    git_ok = False
+    if options.with_git:
+        git_ok = _git_init(project_dir)
     github_ok = False
     if options.create_github:
         github_ok = _create_github_repo(project_dir, name)
