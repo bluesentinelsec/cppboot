@@ -107,6 +107,13 @@ def test_modules_layout(tmp_root: Path) -> None:
     assert not (root / "cmake" / "version.hpp.in").exists()
     cmake = (root / "CMakeLists.txt").read_text(encoding="utf-8")
     assert "3.28" in cmake
+    version_cmake = (root / "src" / "version" / "CMakeLists.txt").read_text(encoding="utf-8")
+    assert "FILE_SET CXX_MODULES" in version_cmake
+    assert "BASE_DIRS" in version_cmake
+    assert "version.cppm" in version_cmake
+    main = (root / "src" / "main.cpp").read_text(encoding="utf-8")
+    assert "import " in main
+    assert "#include" not in main or "CLI" in main  # CLI11 still classic header
 
 
 def test_shared_library(tmp_root: Path) -> None:

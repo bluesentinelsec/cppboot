@@ -418,11 +418,17 @@ cppboot_set_project_warnings(${{PROJECT_NAME}}_app)
 
 def _version_src_cmake(ctx: _Context) -> str:
     if ctx.with_modules:
+        # BASE_DIRS must include the generated .cppm path; CMake rejects FILE_SET
+        # members outside the set's base directories (often defaults to this dir).
         return f"""\
 # version component (C++20 module) — generated from cmake/version.cppm.in + VERSION.
+# Generated unit lives under the build tree; BASE_DIRS must cover that path.
 target_sources(${{PROJECT_NAME}}_lib
   PUBLIC
-    FILE_SET CXX_MODULES FILES
+    FILE_SET CXX_MODULES
+    BASE_DIRS
+      ${{{ctx.macro}_GENERATED_DIR}}
+    FILES
       ${{{ctx.macro}_GENERATED_DIR}}/version.cppm
 )
 """
