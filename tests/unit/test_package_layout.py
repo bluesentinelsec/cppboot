@@ -5,11 +5,14 @@ from __future__ import annotations
 import importlib
 
 import cppboot
+from cppboot._version import __version__ as package_version
 from cppboot.generator import GenerateResult, ProjectOptions, generate_project
 
 
 def test_version_exported() -> None:
-    assert cppboot.__version__ == "0.1.0"
+    # Must track src/cppboot/_version.py — do not hardcode the release number.
+    assert cppboot.__version__ == package_version
+    assert package_version  # non-empty
 
 
 def test_public_api_reexported() -> None:
