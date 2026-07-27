@@ -28,17 +28,35 @@ classifiers = [
 dependencies = []
 
 [project.optional-dependencies]
-dev = ["pytest>=7.0"]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+]
 
 [project.scripts]
 cppboot = "cppboot.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/example/cppboot"
-Repository = "https://github.com/example/cppboot"
+Homepage = "https://github.com/bluesentinelsec/cppboot"
+Repository = "https://github.com/bluesentinelsec/cppboot"
+Issues = "https://github.com/bluesentinelsec/cppboot/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
 cppboot = ["py.typed"]
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+testpaths = ["tests"]
+pythonpath = ["src", "."]
+addopts = ["-ra", "--strict-markers"]
+markers = [
+    "requires_git: needs a git executable on PATH",
+    "requires_make: needs make (and usually clang-format) on PATH",
+]
+
+[tool.coverage.run]
+source = ["cppboot"]
+branch = true

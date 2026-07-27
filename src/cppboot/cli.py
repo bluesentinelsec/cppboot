@@ -103,6 +103,33 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--git",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Run git init and create an initial commit (default: on). "
+            "Use --no-git to skip."
+        ),
+    )
+    parser.add_argument(
+        "--fmt",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Run make fmt after scaffolding (default: on). "
+            "Use --no-fmt to skip."
+        ),
+    )
+    parser.add_argument(
+        "--community-docs",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Write CODE_OF_CONDUCT.md, CONTRIBUTING.md, and SECURITY.md "
+            "(default: on). Use --no-community-docs to skip."
+        ),
+    )
+    parser.add_argument(
         "-v",
         "--verbose",
         action="store_true",
@@ -158,6 +185,9 @@ def main(argv: list[str] | None = None) -> int:
         with_codespaces=args.codespaces,
         create_github=args.github,
         with_github_actions=args.github_actions,
+        with_git=args.git,
+        with_fmt=args.fmt,
+        with_community_docs=args.community_docs,
         verbose=args.verbose,
     )
 
@@ -170,17 +200,27 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Created project at {result.project_dir}")
     print(f"  files: {len(result.files_written)}")
     print(f"  license source: {result.license_source}")
-    print(f"  formatted (make fmt): {'yes' if result.formatted else 'no'}")
-    print(f"  git initial commit: {'yes' if result.git_initialized else 'no'}")
+    if options.with_fmt:
+        print(f"  formatted (make fmt): {'yes' if result.formatted else 'no'}")
+    else:
+        print("  formatted (make fmt): skipped (--no-fmt)")
+    if options.with_git:
+        print(f"  git initial commit: {'yes' if result.git_initialized else 'no'}")
+    else:
+        print("  git initial commit: skipped (--no-git)")
     print(f"  vim: {'yes' if options.with_vim else 'no'}")
     print(f"  ctags: {'yes' if options.with_ctags else 'no'}")
     print(f"  vscode: {'yes' if options.with_vscode else 'no'}")
     print(f"  github-actions: {'yes' if options.with_github_actions else 'no'}")
     print(f"  codespaces: {'yes' if options.with_codespaces else 'no'}")
+    print(f"  community-docs: {'yes' if options.with_community_docs else 'no'}")
     if options.create_github:
         print(f"  github remote: {'yes' if result.github_created else 'failed'}")
     print()
-    print("Scaffold is formatted and committed — ready for real work.")
+    if options.with_fmt and options.with_git and result.formatted and result.git_initialized:
+        print("Scaffold is formatted and committed — ready for real work.")
+    else:
+        print("Scaffold ready.")
     print("Next steps:")
     print(f"  cd {result.project_dir}")
     if options.with_vscode:
