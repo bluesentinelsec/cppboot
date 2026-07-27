@@ -12,6 +12,23 @@ from cppboot.generator import ProjectOptions, generate_project
 from cppboot.licenses import DEFAULT_LICENSE, LICENSE_CHOICES
 
 
+def _add_opt_out(
+    parser: argparse.ArgumentParser,
+    *,
+    flag: str,
+    dest: str,
+    help_text: str,
+) -> None:
+    """Register a default-on feature that is disabled only via ``--no-*``."""
+    parser.add_argument(
+        flag,
+        action="store_false",
+        dest=dest,
+        default=True,
+        help=help_text,
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Create the argument parser."""
     parser = argparse.ArgumentParser(
@@ -51,43 +68,54 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Build the library as a shared library (default: static).",
     )
-    parser.add_argument(
-        "--vim",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Write a minimal project-local .vimrc (default: on). Use --no-vim to skip.",
+    # Opinionated defaults: always on unless the user passes the matching --no-* flag.
+    _add_opt_out(
+        parser,
+        flag="--no-vim",
+        dest="vim",
+        help_text="Do not write a project-local .vimrc.",
     )
-    parser.add_argument(
-        "--ctags",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help=(
-            "Write Universal Ctags config and make tags target (default: on). "
-            "Use --no-ctags to skip."
-        ),
+    _add_opt_out(
+        parser,
+        flag="--no-ctags",
+        dest="ctags",
+        help_text="Do not write Universal Ctags config / make tags target.",
     )
-    parser.add_argument(
-        "--vscode",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help=("Write VS Code config + CMakePresets (default: on). Use --no-vscode to skip."),
+    _add_opt_out(
+        parser,
+        flag="--no-vscode",
+        dest="vscode",
+        help_text="Do not write VS Code config + CMakePresets.",
     )
-    parser.add_argument(
-        "--github-actions",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help=(
-            "Write cross-platform GitHub Actions CI (default: on). Use --no-github-actions to skip."
-        ),
+    _add_opt_out(
+        parser,
+        flag="--no-github-actions",
+        dest="github_actions",
+        help_text="Do not write GitHub Actions CI / sanitizers / release workflows.",
     )
-    parser.add_argument(
-        "--codespaces",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help=(
-            "Write GitHub Codespaces / Dev Container config (default: on). "
-            "Use --no-codespaces to skip."
-        ),
+    _add_opt_out(
+        parser,
+        flag="--no-codespaces",
+        dest="codespaces",
+        help_text="Do not write GitHub Codespaces / Dev Container config.",
+    )
+    _add_opt_out(
+        parser,
+        flag="--no-git",
+        dest="git",
+        help_text="Do not run git init or create an initial commit.",
+    )
+    _add_opt_out(
+        parser,
+        flag="--no-fmt",
+        dest="fmt",
+        help_text="Do not run make fmt after scaffolding.",
+    )
+    _add_opt_out(
+        parser,
+        flag="--no-community-docs",
+        dest="community_docs",
+        help_text="Do not write CODE_OF_CONDUCT.md, CONTRIBUTING.md, or SECURITY.md.",
     )
     parser.add_argument(
         "--github",
@@ -96,27 +124,6 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Create a public GitHub upstream repository using the gh client "
             "(default: off; opt-in only)."
-        ),
-    )
-    parser.add_argument(
-        "--git",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help=("Run git init and create an initial commit (default: on). Use --no-git to skip."),
-    )
-    parser.add_argument(
-        "--fmt",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help=("Run make fmt after scaffolding (default: on). Use --no-fmt to skip."),
-    )
-    parser.add_argument(
-        "--community-docs",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help=(
-            "Write CODE_OF_CONDUCT.md, CONTRIBUTING.md, and SECURITY.md "
-            "(default: on). Use --no-community-docs to skip."
         ),
     )
     parser.add_argument(

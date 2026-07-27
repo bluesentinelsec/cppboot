@@ -52,6 +52,38 @@ def test_parser_opt_outs() -> None:
     assert args.community_docs is False
 
 
+def test_help_lists_opt_outs_not_positive_toggles() -> None:
+    """Opinionated features are default-on; only --no-* should appear in help."""
+    parser = build_parser()
+    option_strings = {opt for action in parser._actions for opt in action.option_strings}
+    for opt_out in (
+        "--no-vim",
+        "--no-ctags",
+        "--no-vscode",
+        "--no-github-actions",
+        "--no-codespaces",
+        "--no-git",
+        "--no-fmt",
+        "--no-community-docs",
+    ):
+        assert opt_out in option_strings
+    # Positive mirrors must not exist (defaults are always on).
+    for positive in ("--vim", "--ctags", "--vscode", "--git", "--fmt", "--community-docs"):
+        assert positive not in option_strings
+    # Opt-in flags remain.
+    assert "--github" in option_strings
+    assert "--with-modules" in option_strings
+
+
+def test_positive_toggle_flags_are_rejected() -> None:
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["-n", "demo", "--vim"])
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["-n", "demo", "--fmt"])
+    # Note: argparse may treat "--git" as an abbreviation of "--github" when
+    # allow_abbrev is true; the explicit option is only "--no-git".
+
+
 def test_parser_opt_in_features() -> None:
     args = build_parser().parse_args(["-n", "demo", "--with-modules", "--shared", "--github"])
     assert args.with_modules is True

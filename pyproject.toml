@@ -7,7 +7,7 @@ name = "cppboot"
 dynamic = ["version"]
 description = "Bootstrap a professional-grade C++ project environment"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.9"
 license = { file = "LICENSE" }
 authors = [{ name = "cppboot contributors" }]
 keywords = ["c++", "cmake", "bootstrap", "scaffold", "project-generator"]
@@ -18,10 +18,13 @@ classifiers = [
     "License :: OSI Approved :: Apache Software License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: 3.15",
     "Topic :: Software Development :: Build Tools",
     "Topic :: Software Development :: Code Generators",
     "Typing :: Typed",
@@ -71,7 +74,7 @@ source = ["cppboot"]
 branch = true
 
 [tool.ruff]
-target-version = "py310"
+target-version = "py39"
 line-length = 100
 src = ["src", "tests"]
 
@@ -99,6 +102,7 @@ quote-style = "double"
 indent-style = "space"
 
 [tool.mypy]
+# Type-check against 3.10+ (current mypy floor). Runtime support includes 3.9 (see CI).
 python_version = "3.10"
 mypy_path = "src"
 packages = ["cppboot"]

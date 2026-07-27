@@ -24,28 +24,33 @@ file (single source of truth) and CLI **`--version` / `-V`**.
 
 ### Options
 
+Requires **Python 3.9+** (CI: 3.9–3.15; Amazon Linux’s system 3.9 is supported).
+
 | Flag | Default | Description |
 |------|---------|-------------|
 | `-n`, `--name` | (prompt) | Project name |
 | `--license` | `apache-2.0` | License id |
 | `--build-system` | `cmake` | Only `cmake` for now |
-| `--with-modules` | off | C++20 modules scaffold |
-| `--shared` | off | Shared library instead of static |
-| `--vim` / `--no-vim` | **on** | Project-local `.vimrc` |
-| `--ctags` / `--no-ctags` | **on** | Universal Ctags `.ctags` + `make tags` |
-| `--vscode` / `--no-vscode` | **on** | VS Code + `CMakePresets.json` |
-| `--github-actions` / `--no-github-actions` | **on** | Multi-OS CI / sanitizers / release workflows |
-| `--codespaces` / `--no-codespaces` | **on** | GitHub Codespaces / Dev Container (`.devcontainer/`) |
-| `--community-docs` / `--no-community-docs` | **on** | `CODE_OF_CONDUCT.md`, `CONTRIBUTING.md`, `SECURITY.md` |
-| `--git` / `--no-git` | **on** | `git init` + initial commit |
-| `--fmt` / `--no-fmt` | **on** | Run `make fmt` after scaffolding |
-| `--github` | **off** | Create GitHub remote with `gh` (opt-in) |
+| `--with-modules` | off | C++20 modules scaffold (opt-in) |
+| `--shared` | off | Shared library instead of static (opt-in) |
+| `--github` | off | Create GitHub remote with `gh` (opt-in) |
 | `--output-dir` | `.` | Parent directory for the new project |
 | `-v`, `--verbose` | off | Verbose logging |
 | `--version` | | Print cppboot version |
 | `-h`, `--help` | | Help |
 
-All default-on features have matching **`--no-*`** opt-outs.
+**Opinionated defaults (always on).** Disable only with `--no-*`:
+
+| Opt-out | Skips |
+|---------|--------|
+| `--no-vim` | Project-local `.vimrc` |
+| `--no-ctags` | Universal Ctags `.ctags` + `make tags` |
+| `--no-vscode` | VS Code + `CMakePresets.json` |
+| `--no-github-actions` | CI / sanitizers / release workflows |
+| `--no-codespaces` | Codespaces / Dev Container |
+| `--no-community-docs` | CoC / CONTRIBUTING / SECURITY |
+| `--no-git` | `git init` + initial commit |
+| `--no-fmt` | `make fmt` after scaffolding |
 
 ## What you get
 
