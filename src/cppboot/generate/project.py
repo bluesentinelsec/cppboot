@@ -6,6 +6,29 @@ import datetime as _dt
 import logging
 from pathlib import Path
 
+from cppboot.generate.android import (
+    AGP_VERSION,
+    GRADLE_VERSION,
+    NDK_VERSION,
+    _android_gitignore_extra,
+    _android_gradle_properties,
+    _android_library_build_gradle,
+    _android_library_manifest,
+    _android_root_build_gradle,
+    _android_settings_gradle,
+    _android_shim_cpp,
+    _android_src_cmake,
+    _android_test_activity_java,
+    _android_test_app_build_gradle,
+    _android_test_app_manifest,
+    _android_test_cpp,
+    _android_tests_cmake,
+    _gradle_wrapper_jar,
+    _gradle_wrapper_properties,
+    _gradlew,
+    _gradlew_bat,
+    _run_android_tests_sh,
+)
 from cppboot.generate.build_wrappers import _build_bat, _makefile
 from cppboot.generate.cmake_files import (
     _benchmarks_cmake,
@@ -34,6 +57,7 @@ from cppboot.generate.docs import (
     _security_md,
 )
 from cppboot.generate.github_actions import (
+    _github_actions_android_workflow,
     _github_actions_release_workflow,
     _github_actions_sanitizers_workflow,
     _github_actions_workflow,
@@ -61,6 +85,7 @@ from cppboot.generate.sources import (
 from cppboot.generate.tooling import _create_github_repo, _git_init, _run_make_fmt
 from cppboot.licenses import fetch_license_text, normalize_license_id
 from cppboot.names import (
+    to_android_package,
     to_macro_prefix,
     to_namespace,
     to_target_name,
@@ -78,6 +103,12 @@ def generate_project(options: ProjectOptions) -> GenerateResult:
         raise ValueError(
             f"unsupported build system {options.build_system!r}; only 'cmake' is available"
         )
+    if options.with_android_ci and options.with_modules:
+        raise ValueError(
+            "--with-android-ci does not support --with-modules: the Android Gradle "
+            "Plugin builds with CMake 3.22.1, which cannot compile C++20 modules "
+            "(requires 3.28+)"
+        )
 
     license_id = normalize_license_id(options.license_id)
     project_dir = (options.root / name).resolve()
@@ -94,10 +125,12 @@ def generate_project(options: ProjectOptions) -> GenerateResult:
         namespace=to_namespace(name),
         target=to_target_name(name),
         macro=to_macro_prefix(name),
+        android_package=to_android_package(name),
         project_dir=project_dir,
         license_id=license_id,
         with_modules=options.with_modules,
         shared_library=options.shared_library,
+        with_android_ci=options.with_android_ci,
         with_vim=options.with_vim,
         with_ctags=options.with_ctags,
         with_vscode=options.with_vscode,
@@ -121,6 +154,17 @@ def generate_project(options: ProjectOptions) -> GenerateResult:
         written.append(path)
         logger.debug("wrote %s", path)
 
+    def write_bytes(relpath: str, data: bytes) -> None:
+        path = project_dir / relpath
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+        written.append(path)
+        logger.debug("wrote %s", path)
+
+    def make_executable(relpath: str) -> None:
+        path = project_dir / relpath
+        path.chmod(path.stat().st_mode | 0o111)
+
     # Root files
     write("VERSION", _version_file())
     write("CMakeLists.txt", _root_cmake(ctx))
@@ -134,7 +178,10 @@ def generate_project(options: ProjectOptions) -> GenerateResult:
         write("CODE_OF_CONDUCT.md", _code_of_conduct_md())
         write("CONTRIBUTING.md", _contributing_md(ctx))
         write("SECURITY.md", _security_md(ctx))
-    write(".gitignore", _gitignore())
+    write(
+        ".gitignore",
+        _gitignore() + (_android_gitignore_extra() if ctx.with_android_ci else ""),
+    )
     write(".gitattributes", _gitattributes())
     write(".clang-format", _clang_format())
     write(".clangd", _clangd())
@@ -168,6 +215,39 @@ def generate_project(options: ProjectOptions) -> GenerateResult:
     write("benchmarks/version/CMakeLists.txt", _version_bench_cmake(ctx))
     write("benchmarks/version/version_bench.cpp", _version_bench(ctx))
 
+    if ctx.with_android_ci:
+        # Gradle project: Prefab AAR library module + consumer test application.
+        write("android/settings.gradle", _android_settings_gradle(ctx))
+        write("android/build.gradle", _android_root_build_gradle(ctx))
+        write("android/gradle.properties", _android_gradle_properties())
+        write("android/gradlew", _gradlew())
+        write("android/gradlew.bat", _gradlew_bat())
+        write("android/gradle/wrapper/gradle-wrapper.properties", _gradle_wrapper_properties())
+        write_bytes("android/gradle/wrapper/gradle-wrapper.jar", _gradle_wrapper_jar())
+        write(f"android/{ctx.target}/build.gradle", _android_library_build_gradle(ctx))
+        write(f"android/{ctx.target}/src/main/AndroidManifest.xml", _android_library_manifest())
+        write("android/test-app/build.gradle", _android_test_app_build_gradle(ctx))
+        write("android/test-app/src/main/AndroidManifest.xml", _android_test_app_manifest(ctx))
+        java_dir = f"{ctx.android_package}.test".replace(".", "/")
+        write(
+            f"android/test-app/src/main/java/{java_dir}/TestActivity.java",
+            _android_test_activity_java(ctx),
+        )
+        # Android-only CMake component and on-device test suite.
+        write("src/android/CMakeLists.txt", _android_src_cmake(ctx))
+        write("src/android/android_library.cpp", _android_shim_cpp(ctx))
+        write("tests/android/CMakeLists.txt", _android_tests_cmake(ctx))
+        write("tests/android/android_test.cpp", _android_test_cpp(ctx))
+        write("scripts/run_android_tests.sh", _run_android_tests_sh(ctx))
+        make_executable("android/gradlew")
+        make_executable("scripts/run_android_tests.sh")
+        logger.info(
+            "wrote Android Prefab AAR scaffold under android/ (Gradle %s, AGP %s, NDK %s)",
+            GRADLE_VERSION,
+            AGP_VERSION,
+            NDK_VERSION,
+        )
+
     if ctx.with_vim:
         write(".vimrc", _vimrc(ctx))
 
@@ -197,6 +277,8 @@ def generate_project(options: ProjectOptions) -> GenerateResult:
         write(".github/workflows/ci.yml", _github_actions_workflow(ctx))
         write(".github/workflows/sanitizers.yml", _github_actions_sanitizers_workflow(ctx))
         write(".github/workflows/release.yml", _github_actions_release_workflow(ctx))
+        if ctx.with_android_ci:
+            write(".github/workflows/android.yml", _github_actions_android_workflow(ctx))
         logger.info("wrote GitHub Actions workflows under .github/workflows/")
 
     year = ctx.year

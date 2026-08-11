@@ -1,0 +1,3 @@
+include src/cppboot/data/android/gradle-wrapper.jar
+include src/cppboot/data/android/gradlew
+include src/cppboot/data/android/gradlew.bat

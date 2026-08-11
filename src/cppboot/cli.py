@@ -68,6 +68,15 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Build the library as a shared library (default: static).",
     )
+    parser.add_argument(
+        "--with-android-ci",
+        action="store_true",
+        help=(
+            "Add an Android Prefab AAR package: android/ Gradle project, "
+            "emulator-driven device tests, and GitHub Actions android.yml + "
+            "release job (default: off; not compatible with --with-modules)."
+        ),
+    )
     # Opinionated defaults: always on unless the user passes the matching --no-* flag.
     _add_opt_out(
         parser,
@@ -176,6 +185,7 @@ def main(argv: list[str] | None = None) -> int:
         build_system=args.build_system,
         with_modules=args.with_modules,
         shared_library=args.shared,
+        with_android_ci=args.with_android_ci,
         with_vim=args.vim,
         with_ctags=args.ctags,
         with_vscode=args.vscode,
@@ -209,6 +219,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  ctags: {'yes' if options.with_ctags else 'no'}")
     print(f"  vscode: {'yes' if options.with_vscode else 'no'}")
     print(f"  github-actions: {'yes' if options.with_github_actions else 'no'}")
+    print(f"  android-ci: {'yes' if options.with_android_ci else 'no'}")
     print(f"  codespaces: {'yes' if options.with_codespaces else 'no'}")
     print(f"  community-docs: {'yes' if options.with_community_docs else 'no'}")
     if options.create_github:
