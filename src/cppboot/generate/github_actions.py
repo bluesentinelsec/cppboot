@@ -58,7 +58,7 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Setup JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
@@ -439,7 +439,7 @@ def _github_actions_release_workflow(ctx: _Context) -> str:
         uses: actions/checkout@v7
 
       - name: Setup JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
