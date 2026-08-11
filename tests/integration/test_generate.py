@@ -483,6 +483,28 @@ def test_web_with_shared_forces_static_core(tmp_root: Path) -> None:
     assert "set(WEBSH_CORE_LIB_TYPE STATIC)" in cmake
 
 
+def test_workflows_do_not_duplicate_runs_on_pr_branches(tmp_root: Path) -> None:
+    """Push triggers are scoped to the default branch so a commit on a PR
+    branch fires exactly one run (pull_request), not push + pull_request."""
+    opts = minimal_options(
+        "onceci",
+        tmp_root,
+        with_github_actions=True,
+        with_android_ci=True,
+        with_ios_ci=True,
+        with_web_ci=True,
+    )
+    generate_project(opts)
+    workflows = tmp_root / "onceci" / ".github" / "workflows"
+    for name in ("ci.yml", "sanitizers.yml", "android.yml", "ios.yml", "web.yml"):
+        text = (workflows / name).read_text(encoding="utf-8")
+        assert "branches: [main, master]" in text, name
+        assert "on:\n  push:\n  pull_request:" not in text, name
+    # release.yml stays tag/dispatch-driven — never event-duplicated.
+    release = (workflows / "release.yml").read_text(encoding="utf-8")
+    assert "pull_request" not in release
+
+
 def test_nonempty_destination_raises(tmp_root: Path) -> None:
     dest = tmp_root / "exists"
     dest.mkdir()

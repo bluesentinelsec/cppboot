@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Generated CI-style workflows (`ci.yml`, `sanitizers.yml`, `android.yml`,
+  `ios.yml`, `web.yml`) no longer run every job twice for commits on pull
+  request branches: the `push` trigger is now scoped to
+  `branches: [main, master]`, so PR branches get exactly one run (the
+  `pull_request` event) while direct pushes to the default branch still
+  run CI. Pushes to branches without an open PR no longer trigger CI —
+  open a PR to get checks.
+
 ### Added
 
 - `--with-web-ci` (opt-in): generated projects gain a web/Emscripten
