@@ -27,6 +27,7 @@ Every generated project is ready for multi-platform development and release:
 | **IDE** | VS Code (clangd, CMake Tools, CodeLLDB, C++ TestMate), optional Vim + ctags |
 | **CI/CD** | GitHub Actions: multi-OS CI, sanitizers, tag/dispatch Release with zip assets |
 | **Android** | Optional Prefab AAR package, device tests, and CI ([guide](android.md)) |
+| **iOS** | Optional XCFramework package, Simulator tests, and CI ([guide](ios.md)) |
 
 ## Platform guides
 
@@ -34,7 +35,7 @@ Every generated project is ready for multi-platform development and release:
 |----------|--------|-------|
 | Linux / macOS / Windows | default | Generated CI covers all three out of the box |
 | **Android** | `--with-android-ci` | [Android package guide](android.md) |
-| iOS | planned (`--with-ios-ci`) | — |
+| **iOS** | `--with-ios-ci` | [iOS package guide](ios.md) |
 | Web / Emscripten | planned (`--with-web-ci`) | — |
 
 ## CLI overview
@@ -49,6 +50,7 @@ Core opt-ins:
 |------|---------|-------------|
 | `--with-modules` | off | C++20 modules layout |
 | `--with-android-ci` | off | Android Prefab AAR package + CI ([guide](android.md)) |
+| `--with-ios-ci` | off | iOS XCFramework package + CI ([guide](ios.md)) |
 | `--shared` | off | Shared library instead of static |
 | `--github` | off | Create a public remote with `gh` and push |
 | `--license` | `apache-2.0` | `apache-2.0`, `mit`, `bsd-3-clause`, `gpl-3.0`, `lgpl-3.0`, `mpl-2.0`, `unlicense` |

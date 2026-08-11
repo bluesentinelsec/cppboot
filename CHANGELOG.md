@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `--with-ios-ci` (opt-in): generated projects gain an iOS XCFramework
+  package — `scripts/build_ios_xcframework.sh` builds static device
+  (arm64) and simulator (arm64/x86_64) slices with the public headers and
+  generated `version.hpp`, `scripts/verify_ios_xcframework.sh` checks
+  slices/headers/version/symbols, a Simulator test app under `tests/ios/`
+  consumes the package (`scripts/run_ios_tests.sh`), and GitHub Actions
+  gains an `ios.yml` workflow plus a `build-ios` release job attaching
+  `<name>-ios-xcframework-release-<version>.zip`. `if(IOS)` CMake guards
+  mirror the Android ones (deps/app/tests/benchmarks off, core forced
+  static). Deployment target iOS 13.0. Not compatible with
+  `--with-modules` (Xcode generator cannot scan C++20 modules).
+- iOS package guide on the documentation site (`docs/ios.md`).
+
 - `--with-android-ci` (opt-in): generated projects gain an Android
   [Prefab](https://google.github.io/prefab/) AAR package — an `android/`
   Gradle project (library module + consumer test app), on-device native

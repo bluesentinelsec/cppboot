@@ -265,6 +265,116 @@ def test_android_with_shared_forces_static_core(tmp_root: Path) -> None:
     assert "set(DROIDSH_CORE_LIB_TYPE STATIC)" in cmake
 
 
+def test_ios_scaffold_files(tmp_root: Path) -> None:
+    opts = minimal_options("apple", tmp_root, with_ios_ci=True)
+    result = generate_project(opts)
+    root = result.project_dir
+
+    for script in (
+        "build_ios_xcframework.sh",
+        "build_ios_test_apps.sh",
+        "verify_ios_xcframework.sh",
+        "run_ios_tests.sh",
+    ):
+        path = root / "scripts" / script
+        assert path.is_file(), script
+        if os.name != "nt":
+            assert path.stat().st_mode & 0o111, f"{script} must be executable"
+
+    build_sh = (root / "scripts" / "build_ios_xcframework.sh").read_text(encoding="utf-8")
+    assert "apple.xcframework" in build_sh
+    assert "-DAPPLE_BUILD_TESTS=OFF" in build_sh
+    assert '--target "apple_lib"' in build_sh
+    verify_sh = (root / "scripts" / "verify_ios_xcframework.sh").read_text(encoding="utf-8")
+    assert "libapple-iphoneos.a" in verify_sh
+    assert "_ZN5apple7Version" in verify_sh
+    runner_sh = (root / "scripts" / "run_ios_tests.sh").read_text(encoding="utf-8")
+    assert "com.example.apple.test" in runner_sh
+    assert "APPLE_IOS_TEST_RESULT" in runner_sh
+
+    tests_cmake = (root / "tests" / "ios" / "CMakeLists.txt").read_text(encoding="utf-8")
+    assert "APPLE_XCFRAMEWORK" in tests_cmake
+    assert "apple_ios_test" in tests_cmake
+    test_mm = (root / "tests" / "ios" / "test_main.mm").read_text(encoding="utf-8")
+    assert "<apple/version.hpp>" in test_mm
+    assert "APPLE_IOS_TEST_RESULT" in test_mm
+    assert (root / "tests" / "ios" / "Info.plist.in").is_file()
+
+    cmake = (root / "CMakeLists.txt").read_text(encoding="utf-8")
+    assert "if(IOS)" in cmake
+    assert "set(APPLE_CORE_LIB_TYPE STATIC)" in cmake
+    # iOS alone must not drag in Android-only bits.
+    assert "CMAKE_POSITION_INDEPENDENT_CODE" not in cmake
+    assert not (root / "android").exists()
+    assert not (root / "src" / "android").exists()
+    assert not (root / ".github").exists()
+
+
+def test_ios_with_github_actions(tmp_root: Path) -> None:
+    opts = minimal_options("appleci", tmp_root, with_ios_ci=True, with_github_actions=True)
+    generate_project(opts)
+    root = tmp_root / "appleci"
+    ios_yml = (root / ".github" / "workflows" / "ios.yml").read_text(encoding="utf-8")
+    assert "build_ios_xcframework.sh Release" in ios_yml
+    assert "runs-on: macos-latest" in ios_yml
+    release = (root / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+    assert "build-ios:" in release
+    assert "needs: [prepare, build, build-ios]" in release
+    # XCFramework archives are zips; no .aar handling without the android flag.
+    assert "*.aar" not in release
+
+
+def test_android_and_ios_combined(tmp_root: Path) -> None:
+    opts = minimal_options(
+        "dual",
+        tmp_root,
+        with_android_ci=True,
+        with_ios_ci=True,
+        with_github_actions=True,
+    )
+    generate_project(opts)
+    root = tmp_root / "dual"
+    assert (root / ".github" / "workflows" / "android.yml").is_file()
+    assert (root / ".github" / "workflows" / "ios.yml").is_file()
+    release = (root / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+    assert "build-android:" in release
+    assert "build-ios:" in release
+    assert "needs: [prepare, build, build-android, build-ios]" in release
+    cmake = (root / "CMakeLists.txt").read_text(encoding="utf-8")
+    assert "if(ANDROID OR IOS)" in cmake
+    assert "if(ANDROID AND (DUAL_BUILD_APP" in cmake
+    assert "if(IOS AND (DUAL_BUILD_APP" in cmake
+    assert "CMAKE_POSITION_INDEPENDENT_CODE" in cmake
+
+
+def test_ios_absent_by_default(tmp_root: Path) -> None:
+    opts = minimal_options("noios", tmp_root, with_github_actions=True)
+    generate_project(opts)
+    root = tmp_root / "noios"
+    assert not (root / "tests" / "ios").exists()
+    assert not (root / "scripts").exists()
+    assert not (root / ".github" / "workflows" / "ios.yml").exists()
+    release = (root / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+    assert "build-ios" not in release
+    cmake = (root / "CMakeLists.txt").read_text(encoding="utf-8")
+    assert "if(IOS)" not in cmake
+
+
+def test_ios_rejects_modules(tmp_root: Path) -> None:
+    opts = minimal_options("iosmod", tmp_root, with_ios_ci=True, with_modules=True)
+    with pytest.raises(ValueError, match="with-modules"):
+        generate_project(opts)
+    assert not (tmp_root / "iosmod").exists()
+
+
+def test_ios_with_shared_forces_static_core(tmp_root: Path) -> None:
+    opts = minimal_options("iossh", tmp_root, with_ios_ci=True, shared_library=True)
+    generate_project(opts)
+    cmake = (tmp_root / "iossh" / "CMakeLists.txt").read_text(encoding="utf-8")
+    assert "set(IOSSH_CORE_LIB_TYPE SHARED)" in cmake
+    assert "set(IOSSH_CORE_LIB_TYPE STATIC)" in cmake
+
+
 def test_nonempty_destination_raises(tmp_root: Path) -> None:
     dest = tmp_root / "exists"
     dest.mkdir()

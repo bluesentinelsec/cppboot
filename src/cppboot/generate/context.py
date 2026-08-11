@@ -20,6 +20,7 @@ class Context:
     with_modules: bool
     shared_library: bool
     with_android_ci: bool
+    with_ios_ci: bool
     with_vim: bool
     with_ctags: bool
     with_vscode: bool

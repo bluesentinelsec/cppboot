@@ -12,6 +12,7 @@ from cppboot.generate.android import (
     NDK_VERSION,
 )
 from cppboot.generate.context import Context
+from cppboot.generate.ios import IOS_DEPLOYMENT_TARGET
 
 _Context = Context
 
@@ -69,6 +70,21 @@ headers, version), then runs the native device tests on an Android emulator
 the same way and attaches `<app>-android-release-<version>.aar` to the
 GitHub Release alongside the zips.
 """
+        ios_row = ""
+        ios_ci_note = ""
+        if ctx.with_ios_ci:
+            ios_row = (
+                "\n| **iOS** | `.github/workflows/ios.yml` | "
+                "XCFramework build + verification + Simulator package tests |"
+            )
+            ios_ci_note = """
+**iOS** (`--with-ios-ci`): builds the Debug and Release XCFrameworks
+(`scripts/build_ios_xcframework.sh`) and the consumer test apps, verifies the
+packaged slices/headers/version, then runs the package tests in an iOS
+Simulator (`scripts/run_ios_tests.sh`). The Release workflow builds the
+release XCFramework the same way and attaches
+`<app>-ios-xcframework-release-<version>.zip` to the GitHub Release.
+"""
         gha_section = f"""
 
 ## Continuous integration
@@ -79,7 +95,7 @@ GitHub Actions workflows (default; disable with `cppboot --no-github-actions`):
 |----------|------|---------|
 | **CI** | `.github/workflows/ci.yml` | Ubuntu/macOS/Windows × Debug+Release, tests, benches, artifacts |
 | **Sanitizers** | `.github/workflows/sanitizers.yml` | Linux ASan+UBSan build + `ctest` (failures fail the job) |
-| **Release** | `.github/workflows/release.yml` | Tag `v*` or manual dispatch → notes + zip assets |{android_row}
+| **Release** | `.github/workflows/release.yml` | Tag `v*` or manual dispatch → notes + zip assets |{android_row}{ios_row}
 
 **CI** (each OS):
 
@@ -110,7 +126,7 @@ prints after configure).
 `ASAN_OPTIONS` / `UBSAN_OPTIONS` set so findings abort (non-zero exit).
 
 Locally on Linux: `make sanitizer` (same flags and env).
-{android_ci_note}
+{android_ci_note}{ios_ci_note}
 ### Creating a release
 
 The root **`VERSION`** file is the only place to bump the package version.
@@ -199,6 +215,52 @@ Notes:
   {AGP_VERSION}, NDK {NDK_VERSION}, compileSdk {ANDROID_COMPILE_SDK},
   minSdk {ANDROID_MIN_SDK}.
 """
+    ios_section = ""
+    if ctx.with_ios_ci:
+        ios_section = f"""
+
+## iOS package (XCFramework)
+
+The iOS scripts (`cppboot --with-ios-ci`) package the C++ library as a static
+XCFramework with device (arm64) and simulator (arm64/x86_64) slices, the
+public headers, and the generated `version.hpp`.
+
+Build on macOS with Xcode command line tools installed:
+
+```bash
+bash scripts/build_ios_xcframework.sh Release
+```
+
+Output: `build/ios/release/{ctx.name}.xcframework` and the versioned archive
+`build/ios/release/{ctx.name}-ios-xcframework-release-<version>.zip`. The
+script verifies the package (`scripts/verify_ios_xcframework.sh`) after
+building. Deployment target defaults to iOS {IOS_DEPLOYMENT_TARGET}; override
+with `{ctx.macro}_IOS_DEPLOYMENT_TARGET`.
+
+Consume the XCFramework from an application's CMake build by linking the
+`.xcframework` directory directly:
+
+```cmake
+target_link_libraries(app_native PRIVATE "/path/to/{ctx.name}.xcframework")
+```
+
+Package tests live in `tests/ios/` and run inside an iOS Simulator:
+
+```bash
+bash scripts/build_ios_test_apps.sh build/ios/release/{ctx.name}.xcframework Release
+bash scripts/run_ios_tests.sh   # boots a temporary Simulator, polls os_log
+```
+
+Notes:
+
+- The test app bundle identifier defaults to `{ctx.android_package}.test` —
+  change it in `tests/ios/CMakeLists.txt` before shipping anything derived
+  from it.
+- On iOS the core library is always built **static** (even when the project
+  was generated with `--shared`).
+- Add project-specific package checks to `tests/ios/test_main.mm`; the
+  host-side GoogleTest suite does not run on iOS.
+"""
     vscode_section = ""
     if ctx.with_vscode:
         vscode_section = f"""
@@ -257,7 +319,7 @@ the build, test, and source-onboarding workflows — not product requirements.
 - **Ninja** is required when this project uses C++20 modules (`--with-modules`)
 - Optional tools: `clang-format`, `doxygen`, an LSP client with clangd
 - Network access on first configure (CMake **FetchContent** downloads pinned deps)
-{gha_section}{android_section}{codespaces_section}{vscode_section}
+{gha_section}{android_section}{ios_section}{codespaces_section}{vscode_section}
 ## Preferred third-party libraries
 
 These are **imported by default** via FetchContent (see `cmake/Dependencies.cmake`)
@@ -557,6 +619,13 @@ def _agents_md(ctx: _Context) -> str:
   module + on-device test app). `.github/workflows/android.yml` builds it and
   runs `scripts/run_android_tests.sh` on an emulator; keep it green. Android
   device tests live in `tests/android/`, not the GoogleTest tree."""
+    ios_bullet = ""
+    if ctx.with_ios_ci:
+        ios_bullet = """
+- If present, `scripts/build_ios_xcframework.sh` packages the iOS XCFramework
+  and `.github/workflows/ios.yml` builds + tests it in an iOS Simulator
+  (`scripts/run_ios_tests.sh`); keep it green. iOS package tests live in
+  `tests/ios/`, not the GoogleTest tree."""
     return f"""\
 # AGENTS.md — working in `{ctx.name}`
 
@@ -624,7 +693,7 @@ Prefer the Makefile (Unix) or `build.bat` (Windows) wrappers:
 - If present, `.github/workflows/ci.yml` is the multi-OS CI contract (Debug +
   Release, tests, benchmarks on Linux/macOS/Windows). Keep it green.
 - If present, `.github/workflows/sanitizers.yml` runs ASan+UBSan on Linux;
-  treat sanitizer failures as bugs. Locally: `make sanitizer`.{android_bullet}
+  treat sanitizer failures as bugs. Locally: `make sanitizer`.{android_bullet}{ios_bullet}
 - **Version:** edit the root **`VERSION`** file only. CMake generates
   `{ctx.namespace}::Version()` / CLI `--version` from `cmake/version.*.in`.
   Ship releases with annotated tags `vX.Y.Z` matching `VERSION` (or

@@ -42,18 +42,24 @@ make test
 ./smoke_min --version | grep -q '0\.1\.0'
 test ! -d android
 
-echo "== android scaffold =="
-python3 -m cppboot -n smoke_droid --with-android-ci --no-git --no-fmt \
+echo "== android + ios scaffold =="
+python3 -m cppboot -n smoke_droid --with-android-ci --with-ios-ci --no-git --no-fmt \
   --output-dir "${OUT}"
 cd "${OUT}/smoke_droid"
 test -x android/gradlew
 test -f android/gradle/wrapper/gradle-wrapper.jar
 test -f android/smoke_droid/build.gradle
 test -x scripts/run_android_tests.sh
+test -x scripts/build_ios_xcframework.sh
+test -x scripts/verify_ios_xcframework.sh
+test -x scripts/run_ios_tests.sh
+test -f tests/ios/test_main.mm
 test -f .github/workflows/android.yml
+test -f .github/workflows/ios.yml
 grep -q 'build-android' .github/workflows/release.yml
-grep -q 'if(ANDROID)' CMakeLists.txt
-# Host build and tests must still pass with the Android CMake blocks present.
+grep -q 'build-ios' .github/workflows/release.yml
+grep -q 'if(ANDROID OR IOS)' CMakeLists.txt
+# Host build and tests must still pass with the platform CMake blocks present.
 make
 make test
 
