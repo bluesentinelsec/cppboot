@@ -355,17 +355,29 @@ xcrun simctl spawn "${{simulator_udid}}" log stream \\
     --predicate "subsystem == \\"${{log_subsystem}}\\"" >"${{log_file}}" 2>&1 &
 stream_pid=$!
 
-xcrun simctl launch --console-pty "${{simulator_udid}}" "${{bundle_id}}" >>"${{log_file}}" 2>&1 &
-launch_pid=$!
-
-deadline=$((SECONDS + timeout_seconds))
+# CI simulators occasionally wedge on the first launch after boot; retry once.
 result=""
-while [[ -z "${{result}}" && ${{SECONDS}} -lt ${{deadline}} ]]; do
-    if grep -q "${{sentinel}}:" "${{log_file}}"; then
-        result="$(grep "${{sentinel}}:" "${{log_file}}" | tail -n 1 | sed -E "s/.*${{sentinel}}: ([0-9]+).*/\\\\1/")"
+for attempt in 1 2; do
+    xcrun simctl launch --console-pty "${{simulator_udid}}" "${{bundle_id}}" >>"${{log_file}}" 2>&1 &
+    launch_pid=$!
+
+    deadline=$((SECONDS + timeout_seconds))
+    while [[ -z "${{result}}" && ${{SECONDS}} -lt ${{deadline}} ]]; do
+        if grep -q "${{sentinel}}:" "${{log_file}}"; then
+            result="$(grep "${{sentinel}}:" "${{log_file}}" | tail -n 1 | sed -E "s/.*${{sentinel}}: ([0-9]+).*/\\\\1/")"
+            break
+        fi
+        sleep 1
+    done
+    if [[ -n "${{result}}" || ${{attempt}} -eq 2 ]]; then
         break
     fi
-    sleep 1
+
+    echo "No ${{sentinel}} within ${{timeout_seconds}}s (attempt ${{attempt}}); relaunching" >&2
+    kill "${{launch_pid}}" >/dev/null 2>&1 || true
+    wait "${{launch_pid}}" >/dev/null 2>&1 || true
+    launch_pid=""
+    xcrun simctl terminate "${{simulator_udid}}" "${{bundle_id}}" >/dev/null 2>&1 || true
 done
 
 echo "----- iOS test log -----"
@@ -373,7 +385,8 @@ sed -n "/PASS:/p;/FAIL:/p;/${{sentinel}}:/p" "${{log_file}}"
 echo "----- end iOS test log -----"
 
 if [[ -z "${{result}}" ]]; then
-    echo "Timed out after ${{timeout_seconds}}s waiting for ${{sentinel}}" >&2
+    echo "Timed out waiting for ${{sentinel}}; raw simulator log tail:" >&2
+    tail -n 100 "${{log_file}}" >&2
     exit 1
 fi
 
