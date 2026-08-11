@@ -155,7 +155,9 @@ EM_JS(void, {ctx.target}_draw_frame, (double x, double y, double size, const cha
     g.fillStyle = '#4fc3f7';
     g.fillRect(x * canvas.width, y * canvas.height, size * dpr, size * dpr);
     g.fillStyle = '#e0e0e0';
-    g.font = `${{14 * dpr}}px monospace`;
+    // Note: no JS template literals here — clang tokenizes the EM_JS body and
+    // rejects '$' under -Werror (-Wdollar-in-identifier-extension).
+    g.font = (14 * dpr) + 'px monospace';
     g.fillText(UTF8ToString(hud), 12 * dpr, 24 * dpr);
 }});
 
