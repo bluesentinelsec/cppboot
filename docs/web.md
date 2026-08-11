@@ -83,7 +83,7 @@ emrun --browser=google-chrome \
 
 ## CI and releases
 
-`.github/workflows/web.yml` runs on every push and pull request:
+`.github/workflows/web.yml` runs on pull requests and pushes to the default branch:
 
 1. Configure/build Debug and Release with `emcmake` (tests on).
 2. Run the browser tests in headless Chrome for both configurations.

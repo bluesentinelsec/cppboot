@@ -38,6 +38,7 @@ name: Android
 
 on:
   push:
+    branches: [main, master]
   pull_request:
 
 concurrency:
@@ -150,6 +151,7 @@ name: CI
 
 on:
   push:
+    branches: [main, master]
   pull_request:
 
 concurrency:
@@ -355,6 +357,7 @@ name: Sanitizers
 
 on:
   push:
+    branches: [main, master]
   pull_request:
 
 concurrency:
@@ -423,6 +426,7 @@ name: iOS
 
 on:
   push:
+    branches: [main, master]
   pull_request:
 
 concurrency:
@@ -561,6 +565,7 @@ name: Web
 
 on:
   push:
+    branches: [main, master]
   pull_request:
 
 concurrency:

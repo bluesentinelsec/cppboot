@@ -101,7 +101,7 @@ host-side GoogleTest suite under `tests/<component>/` does not run on iOS.
 
 ## CI and releases
 
-`.github/workflows/ios.yml` runs on every push and pull request
+`.github/workflows/ios.yml` runs on pull requests and pushes to the default branch
 (`macos-latest`):
 
 1. Build Debug and Release XCFrameworks plus the consumer test apps

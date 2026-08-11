@@ -113,7 +113,7 @@ host-side GoogleTest suite under `tests/<component>/` does not run on Android.
 
 ## CI and releases
 
-`.github/workflows/android.yml` runs on every push and pull request:
+`.github/workflows/android.yml` runs on pull requests and pushes to the default branch:
 
 1. Build Debug and Release AARs plus the consumer test APK.
 2. Verify the release AAR contents: every ABI's `libmylib.so`, the packaged
