@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `--with-android-ci` (opt-in): generated projects gain an Android
+  [Prefab](https://google.github.io/prefab/) AAR package — an `android/`
+  Gradle project (library module + consumer test app), on-device native
+  tests under `tests/android/` driven by `scripts/run_android_tests.sh`,
+  `if(ANDROID)` CMake guards, a GitHub Actions `android.yml` workflow
+  (AAR build, content verification, emulator tests), and a `build-android`
+  release job that attaches `<name>-android-release-<version>.aar`.
+  Pinned toolchain: Gradle 8.10.2, AGP 8.7.3, NDK 27.2.12479018,
+  compileSdk 35, minSdk 21. Not compatible with `--with-modules` (AGP
+  builds with CMake 3.22.1; modules need 3.28+). iOS and web/Emscripten
+  scaffolds will follow the same `generate/<platform>.py` pattern.
+- Public documentation site under `docs/` (GitHub Pages, Jekyll `/docs`
+  folder mode): landing page plus the Android package guide.
+
+### Fixed
+
+- Generated README now renders the sanitizer configure flag
+  (`-D<MACRO>_ENABLE_SANITIZERS=ON`) instead of a literal `{ctx.macro}`
+  placeholder.
+
 ## [0.2.3] - 2026-07-27
 
 ### Added

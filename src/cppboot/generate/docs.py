@@ -2,6 +2,15 @@
 
 from __future__ import annotations
 
+from cppboot.generate.android import (
+    AGP_VERSION,
+    ANDROID_ABIS,
+    ANDROID_CMAKE_VERSION,
+    ANDROID_COMPILE_SDK,
+    ANDROID_MIN_SDK,
+    GRADLE_VERSION,
+    NDK_VERSION,
+)
 from cppboot.generate.context import Context
 
 _Context = Context
@@ -45,7 +54,22 @@ def _readme(ctx: _Context) -> str:
     )
     gha_section = ""
     if ctx.with_github_actions:
-        gha_section = """
+        android_row = ""
+        android_ci_note = ""
+        if ctx.with_android_ci:
+            android_row = (
+                "\n| **Android** | `.github/workflows/android.yml` | "
+                "Prefab AAR build + verification + emulator device tests |"
+            )
+            android_ci_note = """
+**Android** (`--with-android-ci`): builds the Debug and Release Prefab AARs and
+the consumer test APK with Gradle, verifies the release AAR contents (ABIs,
+headers, version), then runs the native device tests on an Android emulator
+(`scripts/run_android_tests.sh`). The Release workflow builds the release AAR
+the same way and attaches `<app>-android-release-<version>.aar` to the
+GitHub Release alongside the zips.
+"""
+        gha_section = f"""
 
 ## Continuous integration
 
@@ -55,7 +79,7 @@ GitHub Actions workflows (default; disable with `cppboot --no-github-actions`):
 |----------|------|---------|
 | **CI** | `.github/workflows/ci.yml` | Ubuntu/macOS/Windows × Debug+Release, tests, benches, artifacts |
 | **Sanitizers** | `.github/workflows/sanitizers.yml` | Linux ASan+UBSan build + `ctest` (failures fail the job) |
-| **Release** | `.github/workflows/release.yml` | Tag `v*` or manual dispatch → notes + zip assets |
+| **Release** | `.github/workflows/release.yml` | Tag `v*` or manual dispatch → notes + zip assets |{android_row}
 
 **CI** (each OS):
 
@@ -82,11 +106,11 @@ Version comes from the root **`VERSION`** file (also what `./<app> --version`
 prints after configure).
 
 **Sanitizers** (Ubuntu + Clang): configure with
-`-{ctx.macro}_ENABLE_SANITIZERS=ON`, build, run tests with
+`-D{ctx.macro}_ENABLE_SANITIZERS=ON`, build, run tests with
 `ASAN_OPTIONS` / `UBSAN_OPTIONS` set so findings abort (non-zero exit).
 
 Locally on Linux: `make sanitizer` (same flags and env).
-
+{android_ci_note}
 ### Creating a release
 
 The root **`VERSION`** file is the only place to bump the package version.
@@ -131,6 +155,49 @@ In desktop VS Code with the Dev Containers extension:
 **Dev Containers: Reopen in Container**.
 
 Disable with `cppboot --no-codespaces` when regenerating a project.
+"""
+    android_section = ""
+    if ctx.with_android_ci:
+        android_section = f"""
+
+## Android package (Prefab AAR)
+
+The `android/` Gradle project (`cppboot --with-android-ci`) packages the C++
+library as an Android [Prefab](https://google.github.io/prefab/) AAR and hosts
+the on-device test application.
+
+Build (requires JDK 17; Gradle downloads the NDK {NDK_VERSION} and its CMake
+{ANDROID_CMAKE_VERSION} automatically):
+
+```bash
+./android/gradlew -p android :{ctx.target}:assembleRelease
+```
+
+Output: `android/{ctx.target}/build/outputs/aar/{ctx.target}-release.aar` with
+`lib{ctx.target}.so` for {", ".join(f"`{abi}`" for abi in ANDROID_ABIS)}.
+Android consumers add the AAR with `buildFeatures {{ prefab true }}` and link
+`{ctx.target}::{ctx.target}` via `find_package({ctx.target} REQUIRED CONFIG)`
+(see `tests/android/CMakeLists.txt` for a working example).
+
+Device tests build `android/test-app` against the AAR and run
+`tests/android/android_test.cpp` on an emulator or attached device:
+
+```bash
+./android/gradlew -p android :test-app:assembleRelease
+bash scripts/run_android_tests.sh   # needs adb + a running emulator/device
+```
+
+Notes:
+
+- The Android application namespace defaults to **`{ctx.android_package}`** —
+  rename it in `android/{ctx.target}/build.gradle`,
+  `android/test-app/build.gradle`, and the test sources before publishing.
+- On Android the core library is always built **static** (even when the
+  project was generated with `--shared`) and folded into one
+  `lib{ctx.target}.so`.
+- Pinned toolchain: Gradle {GRADLE_VERSION}, Android Gradle Plugin
+  {AGP_VERSION}, NDK {NDK_VERSION}, compileSdk {ANDROID_COMPILE_SDK},
+  minSdk {ANDROID_MIN_SDK}.
 """
     vscode_section = ""
     if ctx.with_vscode:
@@ -190,7 +257,7 @@ the build, test, and source-onboarding workflows — not product requirements.
 - **Ninja** is required when this project uses C++20 modules (`--with-modules`)
 - Optional tools: `clang-format`, `doxygen`, an LSP client with clangd
 - Network access on first configure (CMake **FetchContent** downloads pinned deps)
-{gha_section}{codespaces_section}{vscode_section}
+{gha_section}{android_section}{codespaces_section}{vscode_section}
 ## Preferred third-party libraries
 
 These are **imported by default** via FetchContent (see `cmake/Dependencies.cmake`)
@@ -483,6 +550,13 @@ def _agents_md(ctx: _Context) -> str:
         else f"Public headers live under `include/{ctx.namespace}/` "
         f"(directory tree matches the C++ namespace)."
     )
+    android_bullet = ""
+    if ctx.with_android_ci:
+        android_bullet = """
+- If present, `android/` is the Android Prefab AAR Gradle project (library
+  module + on-device test app). `.github/workflows/android.yml` builds it and
+  runs `scripts/run_android_tests.sh` on an emulator; keep it green. Android
+  device tests live in `tests/android/`, not the GoogleTest tree."""
     return f"""\
 # AGENTS.md — working in `{ctx.name}`
 
@@ -550,7 +624,7 @@ Prefer the Makefile (Unix) or `build.bat` (Windows) wrappers:
 - If present, `.github/workflows/ci.yml` is the multi-OS CI contract (Debug +
   Release, tests, benchmarks on Linux/macOS/Windows). Keep it green.
 - If present, `.github/workflows/sanitizers.yml` runs ASan+UBSan on Linux;
-  treat sanitizer failures as bugs. Locally: `make sanitizer`.
+  treat sanitizer failures as bugs. Locally: `make sanitizer`.{android_bullet}
 - **Version:** edit the root **`VERSION`** file only. CMake generates
   `{ctx.namespace}::Version()` / CLI `--version` from `cmake/version.*.in`.
   Ship releases with annotated tags `vX.Y.Z` matching `VERSION` (or

@@ -62,6 +62,72 @@ target_include_directories(${{PROJECT_NAME}}_lib
 )
 """
 
+    if ctx.with_android_ci:
+        options_block = f"""\
+# Preferred third-party libraries (FetchContent). On for top-level apps; off when
+# embedded (and for the Android Prefab AAR, whose public contract is the
+# dependency-free core C++ API).
+set({ctx.macro}_DEFAULT_WITH_OPTIONAL_DEPS ${{{ctx.macro}_IS_TOP_LEVEL}})
+if(ANDROID)
+  set({ctx.macro}_DEFAULT_WITH_OPTIONAL_DEPS OFF)
+endif()
+option({ctx.macro}_WITH_CLI11 "CLI argument parsing via CLI11" ${{{ctx.macro}_DEFAULT_WITH_OPTIONAL_DEPS}})
+option({ctx.macro}_WITH_JSON "JSON parsing via nlohmann/json" ${{{ctx.macro}_DEFAULT_WITH_OPTIONAL_DEPS}})
+option({ctx.macro}_WITH_SPDLOG "Console/file logging via spdlog" ${{{ctx.macro}_DEFAULT_WITH_OPTIONAL_DEPS}})
+
+# When embedded, skip app/tests/benchmarks unless the consumer opts in. Android
+# consumers receive the C++ library as a Prefab AAR; repository tests are hosted
+# by the Gradle test application and run on an emulator/device.
+set({ctx.macro}_DEFAULT_BUILD_APP ${{{ctx.macro}_IS_TOP_LEVEL}})
+set({ctx.macro}_DEFAULT_BUILD_TESTS ${{{ctx.macro}_IS_TOP_LEVEL}})
+set({ctx.macro}_DEFAULT_BUILD_BENCHMARKS ${{{ctx.macro}_IS_TOP_LEVEL}})
+if(ANDROID)
+  set({ctx.macro}_DEFAULT_BUILD_APP OFF)
+  set({ctx.macro}_DEFAULT_BUILD_TESTS OFF)
+  set({ctx.macro}_DEFAULT_BUILD_BENCHMARKS OFF)
+endif()
+option({ctx.macro}_BUILD_APP "Build the demo application executable" ${{{ctx.macro}_DEFAULT_BUILD_APP}})
+option({ctx.macro}_BUILD_TESTS "Build unit tests" ${{{ctx.macro}_DEFAULT_BUILD_TESTS}})
+option({ctx.macro}_BUILD_BENCHMARKS "Build benchmarks" ${{{ctx.macro}_DEFAULT_BUILD_BENCHMARKS}})
+
+if(ANDROID AND ({ctx.macro}_BUILD_APP OR {ctx.macro}_BUILD_TESTS OR {ctx.macro}_BUILD_BENCHMARKS))
+  message(FATAL_ERROR
+    "Android builds provide the {ctx.target} Prefab library; set {ctx.macro}_BUILD_APP, "
+    "{ctx.macro}_BUILD_TESTS, and {ctx.macro}_BUILD_BENCHMARKS to OFF. "
+    "Use the android Gradle project to build and run device tests."
+  )
+endif()
+
+if(ANDROID AND ({ctx.macro}_WITH_CLI11 OR {ctx.macro}_WITH_JSON OR {ctx.macro}_WITH_SPDLOG))
+  message(FATAL_ERROR
+    "The Android Prefab AAR contains the dependency-free core API; set "
+    "{ctx.macro}_WITH_CLI11, {ctx.macro}_WITH_JSON, and {ctx.macro}_WITH_SPDLOG to OFF"
+  )
+endif()"""
+        library_decl = f"""\
+# The Prefab AAR ships a single shared object built from the core library; on
+# Android force the core static (even with --shared) and enable PIC so the
+# archive folds cleanly into lib{ctx.target}.so (see src/android/).
+set({ctx.macro}_CORE_LIB_TYPE {lib_type})
+if(ANDROID)
+  set({ctx.macro}_CORE_LIB_TYPE STATIC)
+  set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+endif()
+add_library(${{PROJECT_NAME}}_lib ${{{ctx.macro}_CORE_LIB_TYPE}})"""
+    else:
+        options_block = f"""\
+# Preferred third-party libraries (FetchContent). On for top-level apps; off when
+# embedded so consumers do not pull CLI/JSON/logging unless they opt in.
+option({ctx.macro}_WITH_CLI11 "CLI argument parsing via CLI11" ${{{ctx.macro}_IS_TOP_LEVEL}})
+option({ctx.macro}_WITH_JSON "JSON parsing via nlohmann/json" ${{{ctx.macro}_IS_TOP_LEVEL}})
+option({ctx.macro}_WITH_SPDLOG "Console/file logging via spdlog" ${{{ctx.macro}_IS_TOP_LEVEL}})
+
+# When embedded, skip app/tests/benchmarks unless the consumer opts in.
+option({ctx.macro}_BUILD_APP "Build the demo application executable" ${{{ctx.macro}_IS_TOP_LEVEL}})
+option({ctx.macro}_BUILD_TESTS "Build unit tests" ${{{ctx.macro}_IS_TOP_LEVEL}})
+option({ctx.macro}_BUILD_BENCHMARKS "Build benchmarks" ${{{ctx.macro}_IS_TOP_LEVEL}})"""
+        library_decl = f"add_library(${{PROJECT_NAME}}_lib {lib_type})"
+
     cmake_min = "3.28" if ctx.with_modules else "3.20"
     return f"""\
 cmake_minimum_required(VERSION {cmake_min})
@@ -129,16 +195,7 @@ list(APPEND CMAKE_MODULE_PATH "${{CMAKE_CURRENT_SOURCE_DIR}}/cmake")
 include(CompilerWarnings)
 include(Sanitizers)
 
-# Preferred third-party libraries (FetchContent). On for top-level apps; off when
-# embedded so consumers do not pull CLI/JSON/logging unless they opt in.
-option({ctx.macro}_WITH_CLI11 "CLI argument parsing via CLI11" ${{{ctx.macro}_IS_TOP_LEVEL}})
-option({ctx.macro}_WITH_JSON "JSON parsing via nlohmann/json" ${{{ctx.macro}_IS_TOP_LEVEL}})
-option({ctx.macro}_WITH_SPDLOG "Console/file logging via spdlog" ${{{ctx.macro}_IS_TOP_LEVEL}})
-
-# When embedded, skip app/tests/benchmarks unless the consumer opts in.
-option({ctx.macro}_BUILD_APP "Build the demo application executable" ${{{ctx.macro}_IS_TOP_LEVEL}})
-option({ctx.macro}_BUILD_TESTS "Build unit tests" ${{{ctx.macro}_IS_TOP_LEVEL}})
-option({ctx.macro}_BUILD_BENCHMARKS "Build benchmarks" ${{{ctx.macro}_IS_TOP_LEVEL}})
+{options_block}
 # ASan + UBSan for project targets (intended for Linux GCC/Clang; see make sanitizer).
 option({ctx.macro}_ENABLE_SANITIZERS "Enable Address+UBSan on project targets" OFF)
 
@@ -150,7 +207,7 @@ if({ctx.macro}_ENABLE_SANITIZERS)
 endif()
 {modules_block}
 {version_generate}
-add_library(${{PROJECT_NAME}}_lib {lib_type})
+{library_decl}
 # Namespaced aliases for consumers (add_subdirectory / FetchContent / find_package).
 add_library(${{PROJECT_NAME}}::lib ALIAS ${{PROJECT_NAME}}_lib)
 add_library(${{PROJECT_NAME}}::{ctx.target} ALIAS ${{PROJECT_NAME}}_lib)
@@ -461,6 +518,14 @@ endfunction()
 
 
 def _src_cmake(ctx: _Context) -> str:
+    android_block = ""
+    if ctx.with_android_ci:
+        android_block = """
+# Android Prefab shared library (built by the android/ Gradle project).
+if(ANDROID)
+  add_subdirectory(android)
+endif()
+"""
     return f"""\
 # Library implementation components.
 # Each logical subdirectory owns a CMakeLists.txt that lists sources explicitly.
@@ -486,7 +551,7 @@ if({ctx.macro}_BUILD_APP)
   endif()
   cppboot_set_project_warnings(${{PROJECT_NAME}}_app)
 endif()
-"""
+{android_block}"""
 
 
 def _version_src_cmake(ctx: _Context) -> str:

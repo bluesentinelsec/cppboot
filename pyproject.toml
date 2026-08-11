@@ -57,7 +57,7 @@ version = { attr = "cppboot._version.__version__" }
 where = ["src"]
 
 [tool.setuptools.package-data]
-cppboot = ["py.typed"]
+cppboot = ["py.typed", "data/android/*"]
 
 [tool.pytest.ini_options]
 minversion = "7.0"

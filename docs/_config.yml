@@ -1,0 +1,9 @@
+title: cppboot
+description: Bootstrap a professional-grade C++ project environment
+theme: jekyll-theme-cayman
+markdown: kramdown
+plugins:
+  - jekyll-relative-links
+relative_links:
+  enabled: true
+  collections: true

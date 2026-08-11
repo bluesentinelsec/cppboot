@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -163,6 +164,105 @@ def test_cmake_is_consumable_as_dependency(tmp_root: Path) -> None:
     assert "find_package" in readme
     src_cmake = (root / "src" / "CMakeLists.txt").read_text(encoding="utf-8")
     assert "BUILD_APP" in src_cmake
+
+
+def test_android_scaffold_files(tmp_root: Path) -> None:
+    opts = minimal_options("droid", tmp_root, with_android_ci=True)
+    result = generate_project(opts)
+    root = result.project_dir
+
+    gradlew = root / "android" / "gradlew"
+    assert gradlew.is_file()
+    if os.name != "nt":  # Windows has no POSIX executable bit
+        assert gradlew.stat().st_mode & 0o111, "gradlew must be executable"
+    jar = root / "android" / "gradle" / "wrapper" / "gradle-wrapper.jar"
+    assert jar.is_file()
+    assert jar.stat().st_size > 0
+    wrapper_props = (
+        root / "android" / "gradle" / "wrapper" / "gradle-wrapper.properties"
+    ).read_text(encoding="utf-8")
+    assert "distributionSha256Sum=" in wrapper_props
+
+    settings = (root / "android" / "settings.gradle").read_text(encoding="utf-8")
+    assert 'include(":droid")' in settings
+    assert 'include(":test-app")' in settings
+
+    lib_gradle = (root / "android" / "droid" / "build.gradle").read_text(encoding="utf-8")
+    assert 'namespace "com.example.droid"' in lib_gradle
+    assert "-DDROID_BUILD_APP=OFF" in lib_gradle
+    assert "-DDROID_BUILD_TESTS=OFF" in lib_gradle
+    assert "prefabPublishing true" in lib_gradle
+    assert "ndkVersion" in lib_gradle
+    assert (root / "android" / "droid" / "src" / "main" / "AndroidManifest.xml").is_file()
+    assert (root / "android" / "test-app" / "build.gradle").is_file()
+    activity = root / ("android/test-app/src/main/java/com/example/droid/test/TestActivity.java")
+    assert activity.is_file()
+    assert "DROID_ANDROID_TESTS" in activity.read_text(encoding="utf-8")
+
+    assert (root / "src" / "android" / "CMakeLists.txt").is_file()
+    assert (root / "src" / "android" / "android_library.cpp").is_file()
+    test_cpp = (root / "tests" / "android" / "android_test.cpp").read_text(encoding="utf-8")
+    assert "Java_com_example_droid_test_TestActivity_runNativeTests" in test_cpp
+    assert "<droid/version.hpp>" in test_cpp
+    runner = root / "scripts" / "run_android_tests.sh"
+    assert runner.is_file()
+    if os.name != "nt":
+        assert runner.stat().st_mode & 0o111, "run_android_tests.sh must be executable"
+
+    cmake = (root / "CMakeLists.txt").read_text(encoding="utf-8")
+    assert "if(ANDROID)" in cmake
+    assert "CMAKE_POSITION_INDEPENDENT_CODE" in cmake
+    src_cmake = (root / "src" / "CMakeLists.txt").read_text(encoding="utf-8")
+    assert "add_subdirectory(android)" in src_cmake
+    gitignore = (root / ".gitignore").read_text(encoding="utf-8")
+    assert "android/.gradle/" in gitignore
+
+    # Workflows are off in minimal_options; the scaffold must not force them on.
+    assert not (root / ".github").exists()
+
+
+def test_android_with_github_actions(tmp_root: Path) -> None:
+    opts = minimal_options("droidci", tmp_root, with_android_ci=True, with_github_actions=True)
+    generate_project(opts)
+    root = tmp_root / "droidci"
+    android_yml = (root / ".github" / "workflows" / "android.yml").read_text(encoding="utf-8")
+    assert ":droidci:assembleRelease" in android_yml
+    assert "reactivecircus/android-emulator-runner" in android_yml
+    release = (root / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+    assert "build-android:" in release
+    assert "needs: [prepare, build, build-android]" in release
+    assert "release-assets/**/*.aar" in release
+
+
+def test_android_absent_by_default(tmp_root: Path) -> None:
+    opts = minimal_options("plainapp", tmp_root, with_github_actions=True)
+    generate_project(opts)
+    root = tmp_root / "plainapp"
+    assert not (root / "android").exists()
+    assert not (root / "src" / "android").exists()
+    assert not (root / "tests" / "android").exists()
+    assert not (root / ".github" / "workflows" / "android.yml").exists()
+    release = (root / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+    assert "build-android" not in release
+    cmake = (root / "CMakeLists.txt").read_text(encoding="utf-8")
+    assert "if(ANDROID)" not in cmake
+    assert "CORE_LIB_TYPE" not in cmake
+    assert "DEFAULT_WITH_OPTIONAL_DEPS" not in cmake
+
+
+def test_android_rejects_modules(tmp_root: Path) -> None:
+    opts = minimal_options("droidmod", tmp_root, with_android_ci=True, with_modules=True)
+    with pytest.raises(ValueError, match="with-modules"):
+        generate_project(opts)
+    assert not (tmp_root / "droidmod").exists()
+
+
+def test_android_with_shared_forces_static_core(tmp_root: Path) -> None:
+    opts = minimal_options("droidsh", tmp_root, with_android_ci=True, shared_library=True)
+    generate_project(opts)
+    cmake = (tmp_root / "droidsh" / "CMakeLists.txt").read_text(encoding="utf-8")
+    assert "set(DROIDSH_CORE_LIB_TYPE SHARED)" in cmake
+    assert "set(DROIDSH_CORE_LIB_TYPE STATIC)" in cmake
 
 
 def test_nonempty_destination_raises(tmp_root: Path) -> None:

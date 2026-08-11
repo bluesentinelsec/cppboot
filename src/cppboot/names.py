@@ -36,3 +36,76 @@ def to_target_name(name: str) -> str:
 def to_macro_prefix(name: str) -> str:
     """Convert a project name to an uppercase macro prefix."""
     return to_target_name(name).upper()
+
+
+_JAVA_KEYWORDS = frozenset(
+    {
+        "abstract",
+        "assert",
+        "boolean",
+        "break",
+        "byte",
+        "case",
+        "catch",
+        "char",
+        "class",
+        "const",
+        "continue",
+        "default",
+        "do",
+        "double",
+        "else",
+        "enum",
+        "extends",
+        "final",
+        "finally",
+        "float",
+        "for",
+        "goto",
+        "if",
+        "implements",
+        "import",
+        "instanceof",
+        "int",
+        "interface",
+        "long",
+        "native",
+        "new",
+        "package",
+        "private",
+        "protected",
+        "public",
+        "return",
+        "short",
+        "static",
+        "strictfp",
+        "super",
+        "switch",
+        "synchronized",
+        "this",
+        "throw",
+        "throws",
+        "transient",
+        "try",
+        "void",
+        "volatile",
+        "while",
+        "true",
+        "false",
+        "null",
+    }
+)
+
+
+def to_android_package(name: str) -> str:
+    """Convert a project name to an Android application namespace.
+
+    The project segment strips every non-alphanumeric character (not just
+    hyphens): underscores in a Java package segment would force JNI name
+    mangling (``_`` becomes ``_1``) in the generated native test symbol, so an
+    all-alphanumeric segment keeps JNI symbols a plain concatenation.
+    """
+    segment = re.sub(r"[^a-z0-9]", "", name.lower())
+    if segment in _JAVA_KEYWORDS:
+        segment += "app"
+    return f"com.example.{segment}"
