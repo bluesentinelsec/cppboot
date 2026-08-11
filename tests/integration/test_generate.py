@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -172,7 +173,8 @@ def test_android_scaffold_files(tmp_root: Path) -> None:
 
     gradlew = root / "android" / "gradlew"
     assert gradlew.is_file()
-    assert gradlew.stat().st_mode & 0o111, "gradlew must be executable"
+    if os.name != "nt":  # Windows has no POSIX executable bit
+        assert gradlew.stat().st_mode & 0o111, "gradlew must be executable"
     jar = root / "android" / "gradle" / "wrapper" / "gradle-wrapper.jar"
     assert jar.is_file()
     assert jar.stat().st_size > 0
@@ -204,7 +206,8 @@ def test_android_scaffold_files(tmp_root: Path) -> None:
     assert "<droid/version.hpp>" in test_cpp
     runner = root / "scripts" / "run_android_tests.sh"
     assert runner.is_file()
-    assert runner.stat().st_mode & 0o111, "run_android_tests.sh must be executable"
+    if os.name != "nt":
+        assert runner.stat().st_mode & 0o111, "run_android_tests.sh must be executable"
 
     cmake = (root / "CMakeLists.txt").read_text(encoding="utf-8")
     assert "if(ANDROID)" in cmake

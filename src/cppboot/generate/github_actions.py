@@ -65,13 +65,13 @@ jobs:
 
       - name: Build Debug AAR and consumer APK
         run: |
-          ./android/gradlew -p android --no-daemon :{ctx.target}:assembleDebug
-          ./android/gradlew -p android --no-daemon :test-app:assembleDebug
+          bash android/gradlew -p android --no-daemon :{ctx.target}:assembleDebug
+          bash android/gradlew -p android --no-daemon :test-app:assembleDebug
 
       - name: Build Release AAR and consumer APK
         run: |
-          ./android/gradlew -p android --no-daemon :{ctx.target}:assembleRelease
-          ./android/gradlew -p android --no-daemon :test-app:assembleRelease
+          bash android/gradlew -p android --no-daemon :{ctx.target}:assembleRelease
+          bash android/gradlew -p android --no-daemon :test-app:assembleRelease
 
       - name: Verify Release AAR
         run: |
@@ -446,8 +446,8 @@ def _github_actions_release_workflow(ctx: _Context) -> str:
 
       - name: Build Release AAR and consumer APK
         run: |
-          ./android/gradlew -p android --no-daemon :{ctx.target}:assembleRelease
-          ./android/gradlew -p android --no-daemon :test-app:assembleRelease
+          bash android/gradlew -p android --no-daemon :{ctx.target}:assembleRelease
+          bash android/gradlew -p android --no-daemon :test-app:assembleRelease
 
       - name: Verify Release AAR version and ABIs
         run: |
