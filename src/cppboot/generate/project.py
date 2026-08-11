@@ -58,6 +58,7 @@ from cppboot.generate.docs import (
 )
 from cppboot.generate.github_actions import (
     _github_actions_android_workflow,
+    _github_actions_ios_workflow,
     _github_actions_release_workflow,
     _github_actions_sanitizers_workflow,
     _github_actions_workflow,
@@ -72,6 +73,15 @@ from cppboot.generate.ide import (
     _vscode_launch,
     _vscode_settings,
     _vscode_tasks,
+)
+from cppboot.generate.ios import (
+    _build_ios_test_apps_sh,
+    _build_ios_xcframework_sh,
+    _ios_info_plist_in,
+    _ios_test_mm,
+    _ios_tests_cmake,
+    _run_ios_tests_sh,
+    _verify_ios_xcframework_sh,
 )
 from cppboot.generate.sources import (
     _main_cpp,
@@ -109,6 +119,12 @@ def generate_project(options: ProjectOptions) -> GenerateResult:
             "Plugin builds with CMake 3.22.1, which cannot compile C++20 modules "
             "(requires 3.28+)"
         )
+    if options.with_ios_ci and options.with_modules:
+        raise ValueError(
+            "--with-ios-ci does not support --with-modules: the XCFramework build "
+            "uses the Xcode generator, which does not support C++20 module "
+            "dependency scanning, and packages the classic include/ header tree"
+        )
 
     license_id = normalize_license_id(options.license_id)
     project_dir = (options.root / name).resolve()
@@ -131,6 +147,7 @@ def generate_project(options: ProjectOptions) -> GenerateResult:
         with_modules=options.with_modules,
         shared_library=options.shared_library,
         with_android_ci=options.with_android_ci,
+        with_ios_ci=options.with_ios_ci,
         with_vim=options.with_vim,
         with_ctags=options.with_ctags,
         with_vscode=options.with_vscode,
@@ -248,6 +265,24 @@ def generate_project(options: ProjectOptions) -> GenerateResult:
             NDK_VERSION,
         )
 
+    if ctx.with_ios_ci:
+        # XCFramework build/verify scripts and the Simulator test application.
+        write("scripts/build_ios_xcframework.sh", _build_ios_xcframework_sh(ctx))
+        write("scripts/build_ios_test_apps.sh", _build_ios_test_apps_sh(ctx))
+        write("scripts/verify_ios_xcframework.sh", _verify_ios_xcframework_sh(ctx))
+        write("scripts/run_ios_tests.sh", _run_ios_tests_sh(ctx))
+        write("tests/ios/CMakeLists.txt", _ios_tests_cmake(ctx))
+        write("tests/ios/test_main.mm", _ios_test_mm(ctx))
+        write("tests/ios/Info.plist.in", _ios_info_plist_in(ctx))
+        for script in (
+            "scripts/build_ios_xcframework.sh",
+            "scripts/build_ios_test_apps.sh",
+            "scripts/verify_ios_xcframework.sh",
+            "scripts/run_ios_tests.sh",
+        ):
+            make_executable(script)
+        logger.info("wrote iOS XCFramework scaffold under scripts/ and tests/ios/")
+
     if ctx.with_vim:
         write(".vimrc", _vimrc(ctx))
 
@@ -279,6 +314,8 @@ def generate_project(options: ProjectOptions) -> GenerateResult:
         write(".github/workflows/release.yml", _github_actions_release_workflow(ctx))
         if ctx.with_android_ci:
             write(".github/workflows/android.yml", _github_actions_android_workflow(ctx))
+        if ctx.with_ios_ci:
+            write(".github/workflows/ios.yml", _github_actions_ios_workflow(ctx))
         logger.info("wrote GitHub Actions workflows under .github/workflows/")
 
     year = ctx.year

@@ -26,6 +26,7 @@ def test_parser_defaults() -> None:
     assert args.with_modules is False
     assert args.shared is False
     assert args.with_android_ci is False
+    assert args.with_ios_ci is False
 
 
 def test_parser_opt_outs() -> None:
@@ -75,6 +76,7 @@ def test_help_lists_opt_outs_not_positive_toggles() -> None:
     assert "--github" in option_strings
     assert "--with-modules" in option_strings
     assert "--with-android-ci" in option_strings
+    assert "--with-ios-ci" in option_strings
 
 
 def test_positive_toggle_flags_are_rejected() -> None:
@@ -97,6 +99,13 @@ def test_parser_opt_in_features() -> None:
 def test_parser_android_ci_opt_in() -> None:
     args = build_parser().parse_args(["-n", "demo", "--with-android-ci"])
     assert args.with_android_ci is True
+    assert args.with_ios_ci is False
+
+
+def test_parser_ios_ci_opt_in() -> None:
+    args = build_parser().parse_args(["-n", "demo", "--with-ios-ci"])
+    assert args.with_ios_ci is True
+    assert args.with_android_ci is False
 
 
 def test_version_flag(capsys: pytest.CaptureFixture[str]) -> None:
@@ -131,6 +140,7 @@ def test_main_wires_options(tmp_path: Path) -> None:
                 "--no-community-docs",
                 "--no-vim",
                 "--with-android-ci",
+                "--with-ios-ci",
                 "--license",
                 "mit",
             ]
@@ -143,6 +153,7 @@ def test_main_wires_options(tmp_path: Path) -> None:
     assert opts.with_community_docs is False
     assert opts.with_vim is False
     assert opts.with_android_ci is True
+    assert opts.with_ios_ci is True
     assert opts.license_id == "mit"
 
 

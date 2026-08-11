@@ -77,6 +77,15 @@ def build_parser() -> argparse.ArgumentParser:
             "release job (default: off; not compatible with --with-modules)."
         ),
     )
+    parser.add_argument(
+        "--with-ios-ci",
+        action="store_true",
+        help=(
+            "Add an iOS XCFramework package: build/verify scripts, "
+            "Simulator-driven package tests, and GitHub Actions ios.yml + "
+            "release job (default: off; not compatible with --with-modules)."
+        ),
+    )
     # Opinionated defaults: always on unless the user passes the matching --no-* flag.
     _add_opt_out(
         parser,
@@ -186,6 +195,7 @@ def main(argv: list[str] | None = None) -> int:
         with_modules=args.with_modules,
         shared_library=args.shared,
         with_android_ci=args.with_android_ci,
+        with_ios_ci=args.with_ios_ci,
         with_vim=args.vim,
         with_ctags=args.ctags,
         with_vscode=args.vscode,
@@ -220,6 +230,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  vscode: {'yes' if options.with_vscode else 'no'}")
     print(f"  github-actions: {'yes' if options.with_github_actions else 'no'}")
     print(f"  android-ci: {'yes' if options.with_android_ci else 'no'}")
+    print(f"  ios-ci: {'yes' if options.with_ios_ci else 'no'}")
     print(f"  codespaces: {'yes' if options.with_codespaces else 'no'}")
     print(f"  community-docs: {'yes' if options.with_community_docs else 'no'}")
     if options.create_github:

@@ -26,6 +26,7 @@ def test_generate_submodules_importable() -> None:
         "cppboot.generate",
         "cppboot.generate.project",
         "cppboot.generate.android",
+        "cppboot.generate.ios",
         "cppboot.generate.cmake_files",
         "cppboot.generate.build_wrappers",
         "cppboot.generate.docs",

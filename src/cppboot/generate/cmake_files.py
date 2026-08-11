@@ -62,34 +62,20 @@ target_include_directories(${{PROJECT_NAME}}_lib
 )
 """
 
+    platform_conds = []
+    package_names = []
     if ctx.with_android_ci:
-        options_block = f"""\
-# Preferred third-party libraries (FetchContent). On for top-level apps; off when
-# embedded (and for the Android Prefab AAR, whose public contract is the
-# dependency-free core C++ API).
-set({ctx.macro}_DEFAULT_WITH_OPTIONAL_DEPS ${{{ctx.macro}_IS_TOP_LEVEL}})
-if(ANDROID)
-  set({ctx.macro}_DEFAULT_WITH_OPTIONAL_DEPS OFF)
-endif()
-option({ctx.macro}_WITH_CLI11 "CLI argument parsing via CLI11" ${{{ctx.macro}_DEFAULT_WITH_OPTIONAL_DEPS}})
-option({ctx.macro}_WITH_JSON "JSON parsing via nlohmann/json" ${{{ctx.macro}_DEFAULT_WITH_OPTIONAL_DEPS}})
-option({ctx.macro}_WITH_SPDLOG "Console/file logging via spdlog" ${{{ctx.macro}_DEFAULT_WITH_OPTIONAL_DEPS}})
-
-# When embedded, skip app/tests/benchmarks unless the consumer opts in. Android
-# consumers receive the C++ library as a Prefab AAR; repository tests are hosted
-# by the Gradle test application and run on an emulator/device.
-set({ctx.macro}_DEFAULT_BUILD_APP ${{{ctx.macro}_IS_TOP_LEVEL}})
-set({ctx.macro}_DEFAULT_BUILD_TESTS ${{{ctx.macro}_IS_TOP_LEVEL}})
-set({ctx.macro}_DEFAULT_BUILD_BENCHMARKS ${{{ctx.macro}_IS_TOP_LEVEL}})
-if(ANDROID)
-  set({ctx.macro}_DEFAULT_BUILD_APP OFF)
-  set({ctx.macro}_DEFAULT_BUILD_TESTS OFF)
-  set({ctx.macro}_DEFAULT_BUILD_BENCHMARKS OFF)
-endif()
-option({ctx.macro}_BUILD_APP "Build the demo application executable" ${{{ctx.macro}_DEFAULT_BUILD_APP}})
-option({ctx.macro}_BUILD_TESTS "Build unit tests" ${{{ctx.macro}_DEFAULT_BUILD_TESTS}})
-option({ctx.macro}_BUILD_BENCHMARKS "Build benchmarks" ${{{ctx.macro}_DEFAULT_BUILD_BENCHMARKS}})
-
+        platform_conds.append("ANDROID")
+        package_names.append("Android Prefab AAR")
+    if ctx.with_ios_ci:
+        platform_conds.append("IOS")
+        package_names.append("iOS XCFramework")
+    if platform_conds:
+        cond = " OR ".join(platform_conds)
+        packages = " and ".join(package_names)
+        guards = []
+        if ctx.with_android_ci:
+            guards.append(f"""
 if(ANDROID AND ({ctx.macro}_BUILD_APP OR {ctx.macro}_BUILD_TESTS OR {ctx.macro}_BUILD_BENCHMARKS))
   message(FATAL_ERROR
     "Android builds provide the {ctx.target} Prefab library; set {ctx.macro}_BUILD_APP, "
@@ -103,16 +89,64 @@ if(ANDROID AND ({ctx.macro}_WITH_CLI11 OR {ctx.macro}_WITH_JSON OR {ctx.macro}_W
     "The Android Prefab AAR contains the dependency-free core API; set "
     "{ctx.macro}_WITH_CLI11, {ctx.macro}_WITH_JSON, and {ctx.macro}_WITH_SPDLOG to OFF"
   )
+endif()""")
+        if ctx.with_ios_ci:
+            guards.append(f"""
+if(IOS AND ({ctx.macro}_BUILD_APP OR {ctx.macro}_BUILD_TESTS OR {ctx.macro}_BUILD_BENCHMARKS))
+  message(FATAL_ERROR
+    "iOS builds provide the {ctx.target} XCFramework library; set {ctx.macro}_BUILD_APP, "
+    "{ctx.macro}_BUILD_TESTS, and {ctx.macro}_BUILD_BENCHMARKS to OFF. "
+    "Use the iOS package test application for Simulator tests."
+  )
+endif()
+
+if(IOS AND ({ctx.macro}_WITH_CLI11 OR {ctx.macro}_WITH_JSON OR {ctx.macro}_WITH_SPDLOG))
+  message(FATAL_ERROR
+    "The iOS XCFramework contains the dependency-free core API; set "
+    "{ctx.macro}_WITH_CLI11, {ctx.macro}_WITH_JSON, and {ctx.macro}_WITH_SPDLOG to OFF"
+  )
+endif()""")
+        options_block = f"""\
+# Preferred third-party libraries (FetchContent). On for top-level apps; off when
+# embedded (and for the {packages} package, whose public
+# contract is the dependency-free core C++ API).
+set({ctx.macro}_DEFAULT_WITH_OPTIONAL_DEPS ${{{ctx.macro}_IS_TOP_LEVEL}})
+if({cond})
+  set({ctx.macro}_DEFAULT_WITH_OPTIONAL_DEPS OFF)
+endif()
+option({ctx.macro}_WITH_CLI11 "CLI argument parsing via CLI11" ${{{ctx.macro}_DEFAULT_WITH_OPTIONAL_DEPS}})
+option({ctx.macro}_WITH_JSON "JSON parsing via nlohmann/json" ${{{ctx.macro}_DEFAULT_WITH_OPTIONAL_DEPS}})
+option({ctx.macro}_WITH_SPDLOG "Console/file logging via spdlog" ${{{ctx.macro}_DEFAULT_WITH_OPTIONAL_DEPS}})
+
+# When embedded, skip app/tests/benchmarks unless the consumer opts in. Platform
+# package consumers receive the C++ library as a packaged artifact; repository
+# tests run in the platform test application instead of CTest.
+set({ctx.macro}_DEFAULT_BUILD_APP ${{{ctx.macro}_IS_TOP_LEVEL}})
+set({ctx.macro}_DEFAULT_BUILD_TESTS ${{{ctx.macro}_IS_TOP_LEVEL}})
+set({ctx.macro}_DEFAULT_BUILD_BENCHMARKS ${{{ctx.macro}_IS_TOP_LEVEL}})
+if({cond})
+  set({ctx.macro}_DEFAULT_BUILD_APP OFF)
+  set({ctx.macro}_DEFAULT_BUILD_TESTS OFF)
+  set({ctx.macro}_DEFAULT_BUILD_BENCHMARKS OFF)
+endif()
+option({ctx.macro}_BUILD_APP "Build the demo application executable" ${{{ctx.macro}_DEFAULT_BUILD_APP}})
+option({ctx.macro}_BUILD_TESTS "Build unit tests" ${{{ctx.macro}_DEFAULT_BUILD_TESTS}})
+option({ctx.macro}_BUILD_BENCHMARKS "Build benchmarks" ${{{ctx.macro}_DEFAULT_BUILD_BENCHMARKS}})
+{"".join(guards)}"""
+        pic_block = ""
+        if ctx.with_android_ci:
+            pic_block = """
+if(ANDROID)
+  set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 endif()"""
         library_decl = f"""\
-# The Prefab AAR ships a single shared object built from the core library; on
-# Android force the core static (even with --shared) and enable PIC so the
-# archive folds cleanly into lib{ctx.target}.so (see src/android/).
+# The {packages} package ships the core as a static
+# archive, so force the core static there (even with --shared). Android
+# additionally needs PIC: the archive folds into lib{ctx.target}.so (src/android/).
 set({ctx.macro}_CORE_LIB_TYPE {lib_type})
-if(ANDROID)
+if({cond})
   set({ctx.macro}_CORE_LIB_TYPE STATIC)
-  set(CMAKE_POSITION_INDEPENDENT_CODE ON)
-endif()
+endif(){pic_block}
 add_library(${{PROJECT_NAME}}_lib ${{{ctx.macro}_CORE_LIB_TYPE}})"""
     else:
         options_block = f"""\
