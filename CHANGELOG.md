@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `--with-web-ci` (opt-in): generated projects gain a web/Emscripten
+  package aimed at browser game development — an HTML5 canvas demo under
+  `src/web/` (an `emscripten_set_main_loop` game loop with delta-time
+  updates, an `EM_JS` canvas renderer, and a custom fullscreen-canvas
+  shell page; `-sUSE_WEBGL2` and `-sALLOW_MEMORY_GROWTH` linked, with
+  commented hooks for `--preload-file` assets and SDL2), browser tests
+  under `tests/web/` (GoogleTest compiled to wasm, run in headless
+  Chrome via `emrun`), Emscripten-aware CMake guards (deps off, app and
+  benchmarks hard-disabled, core forced static, tests switch to the
+  browser page, new `<MACRO>_BUILD_WEB_DEMO` option), a GitHub Actions
+  `web.yml` workflow, and a `build-web` release job attaching
+  `<name>-web-wasm32-release-<version>.zip` (wasm library + headers +
+  playable demo + `EMSCRIPTEN_VERSION`). Not compatible with
+  `--with-modules`.
+- Web package guide on the documentation site (`docs/web.md`).
+
 - `--with-ios-ci` (opt-in): generated projects gain an iOS XCFramework
   package — `scripts/build_ios_xcframework.sh` builds static device
   (arm64) and simulator (arm64/x86_64) slices with the public headers and

@@ -21,6 +21,7 @@ class Context:
     shared_library: bool
     with_android_ci: bool
     with_ios_ci: bool
+    with_web_ci: bool
     with_vim: bool
     with_ctags: bool
     with_vscode: bool

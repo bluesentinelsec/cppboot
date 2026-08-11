@@ -70,9 +70,15 @@ target_include_directories(${{PROJECT_NAME}}_lib
     if ctx.with_ios_ci:
         platform_conds.append("IOS")
         package_names.append("iOS XCFramework")
+    if ctx.with_web_ci:
+        platform_conds.append("EMSCRIPTEN")
+        package_names.append("web/Emscripten")
     if platform_conds:
         cond = " OR ".join(platform_conds)
         packages = " and ".join(package_names)
+        # Android/iOS host repository tests in platform test apps; web keeps
+        # BUILD_TESTS on (tests/web compiles GoogleTest to wasm).
+        tests_off_conds = [c for c in platform_conds if c != "EMSCRIPTEN"]
         guards = []
         if ctx.with_android_ci:
             guards.append(f"""
@@ -106,6 +112,34 @@ if(IOS AND ({ctx.macro}_WITH_CLI11 OR {ctx.macro}_WITH_JSON OR {ctx.macro}_WITH_
     "{ctx.macro}_WITH_CLI11, {ctx.macro}_WITH_JSON, and {ctx.macro}_WITH_SPDLOG to OFF"
   )
 endif()""")
+        if ctx.with_web_ci:
+            guards.append(f"""
+if(EMSCRIPTEN AND ({ctx.macro}_BUILD_APP OR {ctx.macro}_BUILD_BENCHMARKS))
+  message(FATAL_ERROR
+    "Browser builds provide the static {ctx.target} library, the web demo, and "
+    "browser tests; set {ctx.macro}_BUILD_APP and {ctx.macro}_BUILD_BENCHMARKS to OFF"
+  )
+endif()""")
+        forcing = ""
+        if tests_off_conds:
+            tcond = " OR ".join(tests_off_conds)
+            forcing += f"""if({tcond})
+  set({ctx.macro}_DEFAULT_BUILD_APP OFF)
+  set({ctx.macro}_DEFAULT_BUILD_TESTS OFF)
+  set({ctx.macro}_DEFAULT_BUILD_BENCHMARKS OFF)
+endif()
+"""
+        if ctx.with_web_ci:
+            forcing += f"""if(EMSCRIPTEN)
+  set({ctx.macro}_DEFAULT_BUILD_APP OFF)
+  set({ctx.macro}_DEFAULT_BUILD_BENCHMARKS OFF)
+endif()
+"""
+        web_demo_option = ""
+        if ctx.with_web_ci:
+            web_demo_option = f"""
+# HTML5 canvas demo page for top-level Emscripten builds (see src/web/).
+option({ctx.macro}_BUILD_WEB_DEMO "Build the web canvas demo (Emscripten only)" ${{{ctx.macro}_IS_TOP_LEVEL}})"""
         options_block = f"""\
 # Preferred third-party libraries (FetchContent). On for top-level apps; off when
 # embedded (and for the {packages} package, whose public
@@ -120,18 +154,14 @@ option({ctx.macro}_WITH_SPDLOG "Console/file logging via spdlog" ${{{ctx.macro}_
 
 # When embedded, skip app/tests/benchmarks unless the consumer opts in. Platform
 # package consumers receive the C++ library as a packaged artifact; repository
-# tests run in the platform test application instead of CTest.
+# tests run in the platform test application instead of CTest (browser tests
+# under tests/web keep BUILD_TESTS meaningful for Emscripten).
 set({ctx.macro}_DEFAULT_BUILD_APP ${{{ctx.macro}_IS_TOP_LEVEL}})
 set({ctx.macro}_DEFAULT_BUILD_TESTS ${{{ctx.macro}_IS_TOP_LEVEL}})
 set({ctx.macro}_DEFAULT_BUILD_BENCHMARKS ${{{ctx.macro}_IS_TOP_LEVEL}})
-if({cond})
-  set({ctx.macro}_DEFAULT_BUILD_APP OFF)
-  set({ctx.macro}_DEFAULT_BUILD_TESTS OFF)
-  set({ctx.macro}_DEFAULT_BUILD_BENCHMARKS OFF)
-endif()
-option({ctx.macro}_BUILD_APP "Build the demo application executable" ${{{ctx.macro}_DEFAULT_BUILD_APP}})
+{forcing}option({ctx.macro}_BUILD_APP "Build the demo application executable" ${{{ctx.macro}_DEFAULT_BUILD_APP}})
 option({ctx.macro}_BUILD_TESTS "Build unit tests" ${{{ctx.macro}_DEFAULT_BUILD_TESTS}})
-option({ctx.macro}_BUILD_BENCHMARKS "Build benchmarks" ${{{ctx.macro}_DEFAULT_BUILD_BENCHMARKS}})
+option({ctx.macro}_BUILD_BENCHMARKS "Build benchmarks" ${{{ctx.macro}_DEFAULT_BUILD_BENCHMARKS}}){web_demo_option}
 {"".join(guards)}"""
         pic_block = ""
         if ctx.with_android_ci:
@@ -560,6 +590,13 @@ if(ANDROID)
   add_subdirectory(android)
 endif()
 """
+    if ctx.with_web_ci:
+        android_block += """
+# Web canvas demo (Emscripten game loop; see src/web/).
+if(EMSCRIPTEN)
+  add_subdirectory(web)
+endif()
+"""
     return f"""\
 # Library implementation components.
 # Each logical subdirectory owns a CMakeLists.txt that lists sources explicitly.
@@ -615,7 +652,17 @@ target_sources(${{PROJECT_NAME}}_lib
 
 
 def _tests_cmake(ctx: _Context) -> str:
-    _ = ctx
+    if ctx.with_web_ci:
+        return """\
+# Unit tests — one subdirectory per component under test.
+# Browser builds run the wasm test page instead of the native CTest suites.
+if(EMSCRIPTEN)
+  add_subdirectory(web)
+  return()
+endif()
+
+add_subdirectory(version)
+"""
     return """\
 # Unit tests — one subdirectory per component under test.
 add_subdirectory(version)

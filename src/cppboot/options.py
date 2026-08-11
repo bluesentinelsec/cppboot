@@ -20,6 +20,7 @@ class ProjectOptions:
     shared_library: bool = False
     with_android_ci: bool = False
     with_ios_ci: bool = False
+    with_web_ci: bool = False
     with_vim: bool = True
     with_ctags: bool = True
     with_vscode: bool = True
