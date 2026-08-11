@@ -20,6 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   compileSdk 35, minSdk 21. Not compatible with `--with-modules` (AGP
   builds with CMake 3.22.1; modules need 3.28+). iOS and web/Emscripten
   scaffolds will follow the same `generate/<platform>.py` pattern.
+- Public documentation site under `docs/` (GitHub Pages, Jekyll `/docs`
+  folder mode): landing page plus the Android package guide.
 
 ### Fixed
 

@@ -13,6 +13,8 @@ cd myproj && make && make test
 [![Python versions](https://img.shields.io/pypi/pyversions/cppboot.svg)](https://pypi.org/project/cppboot/)
 [![License](https://img.shields.io/pypi/l/cppboot.svg)](https://github.com/bluesentinelsec/cppboot/blob/main/LICENSE)
 
+**Documentation:** [bluesentinelsec.github.io/cppboot](https://bluesentinelsec.github.io/cppboot/) — including the [Android package guide](https://bluesentinelsec.github.io/cppboot/android.html) (`--with-android-ci`).
+
 ---
 
 ## Requirements
