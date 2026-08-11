@@ -630,7 +630,8 @@ jobs:
           test -f build/web-release/bin/{ctx.name}.html
           test -f build/web-release/bin/{ctx.name}.js
           test -f build/web-release/bin/{ctx.name}.wasm
-          grep -q "id=\\"canvas\\"" build/web-release/bin/{ctx.name}.html
+          # emcc -O3 minifies the shell (strips attribute quotes); match the tag.
+          grep -qi "<canvas" build/web-release/bin/{ctx.name}.html
 
       - name: Package web library and demo
         id: package
