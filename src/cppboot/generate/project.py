@@ -61,6 +61,7 @@ from cppboot.generate.github_actions import (
     _github_actions_ios_workflow,
     _github_actions_release_workflow,
     _github_actions_sanitizers_workflow,
+    _github_actions_web_workflow,
     _github_actions_workflow,
 )
 from cppboot.generate.ide import (
@@ -93,6 +94,13 @@ from cppboot.generate.sources import (
     _version_test,
 )
 from cppboot.generate.tooling import _create_github_repo, _git_init, _run_make_fmt
+from cppboot.generate.web import (
+    _web_demo_cmake,
+    _web_demo_main_cpp,
+    _web_shell_html,
+    _web_test_cpp,
+    _web_tests_cmake,
+)
 from cppboot.licenses import fetch_license_text, normalize_license_id
 from cppboot.names import (
     to_android_package,
@@ -125,6 +133,12 @@ def generate_project(options: ProjectOptions) -> GenerateResult:
             "uses the Xcode generator, which does not support C++20 module "
             "dependency scanning, and packages the classic include/ header tree"
         )
+    if options.with_web_ci and options.with_modules:
+        raise ValueError(
+            "--with-web-ci does not support --with-modules: C++20 module scanning "
+            "is untested with the Emscripten toolchain, and the web package ships "
+            "the classic include/ header tree"
+        )
 
     license_id = normalize_license_id(options.license_id)
     project_dir = (options.root / name).resolve()
@@ -148,6 +162,7 @@ def generate_project(options: ProjectOptions) -> GenerateResult:
         shared_library=options.shared_library,
         with_android_ci=options.with_android_ci,
         with_ios_ci=options.with_ios_ci,
+        with_web_ci=options.with_web_ci,
         with_vim=options.with_vim,
         with_ctags=options.with_ctags,
         with_vscode=options.with_vscode,
@@ -283,6 +298,15 @@ def generate_project(options: ProjectOptions) -> GenerateResult:
             make_executable(script)
         logger.info("wrote iOS XCFramework scaffold under scripts/ and tests/ios/")
 
+    if ctx.with_web_ci:
+        # HTML5 canvas demo (game loop) plus browser-run wasm tests.
+        write("src/web/CMakeLists.txt", _web_demo_cmake(ctx))
+        write("src/web/main_web.cpp", _web_demo_main_cpp(ctx))
+        write("src/web/shell.html", _web_shell_html(ctx))
+        write("tests/web/CMakeLists.txt", _web_tests_cmake(ctx))
+        write("tests/web/web_test.cpp", _web_test_cpp(ctx))
+        logger.info("wrote web/Emscripten scaffold under src/web/ and tests/web/")
+
     if ctx.with_vim:
         write(".vimrc", _vimrc(ctx))
 
@@ -316,6 +340,8 @@ def generate_project(options: ProjectOptions) -> GenerateResult:
             write(".github/workflows/android.yml", _github_actions_android_workflow(ctx))
         if ctx.with_ios_ci:
             write(".github/workflows/ios.yml", _github_actions_ios_workflow(ctx))
+        if ctx.with_web_ci:
+            write(".github/workflows/web.yml", _github_actions_web_workflow(ctx))
         logger.info("wrote GitHub Actions workflows under .github/workflows/")
 
     year = ctx.year

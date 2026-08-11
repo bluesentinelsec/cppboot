@@ -375,6 +375,114 @@ def test_ios_with_shared_forces_static_core(tmp_root: Path) -> None:
     assert "set(IOSSH_CORE_LIB_TYPE STATIC)" in cmake
 
 
+def test_web_scaffold_files(tmp_root: Path) -> None:
+    opts = minimal_options("game", tmp_root, with_web_ci=True)
+    result = generate_project(opts)
+    root = result.project_dir
+
+    demo_cmake = (root / "src" / "web" / "CMakeLists.txt").read_text(encoding="utf-8")
+    assert "game_web_demo" in demo_cmake
+    assert "GAME_BUILD_WEB_DEMO" in demo_cmake
+    assert "-sUSE_WEBGL2=1" in demo_cmake
+    assert "--shell-file" in demo_cmake
+    assert "--preload-file" in demo_cmake  # commented asset hook
+    assert "-sUSE_SDL=2" in demo_cmake  # commented SDL hook
+    demo_cpp = (root / "src" / "web" / "main_web.cpp").read_text(encoding="utf-8")
+    assert "emscripten_set_main_loop" in demo_cpp
+    assert "<game/version.hpp>" in demo_cpp
+    assert "EM_JS" in demo_cpp
+    shell = (root / "src" / "web" / "shell.html").read_text(encoding="utf-8")
+    assert "{{{ SCRIPT }}}" in shell
+    assert 'id="canvas"' in shell
+    assert "<title>game</title>" in shell
+
+    tests_cmake = (root / "tests" / "web" / "CMakeLists.txt").read_text(encoding="utf-8")
+    assert "game_web_test" in tests_cmake
+    assert 'SUFFIX ".html"' in tests_cmake
+    assert "--emrun" in tests_cmake
+    test_cpp = (root / "tests" / "web" / "web_test.cpp").read_text(encoding="utf-8")
+    assert "<game/version.hpp>" in test_cpp
+    assert "emscripten_run_script_string" in test_cpp
+
+    cmake = (root / "CMakeLists.txt").read_text(encoding="utf-8")
+    assert "if(EMSCRIPTEN)" in cmake
+    assert "GAME_BUILD_WEB_DEMO" in cmake
+    assert "set(GAME_CORE_LIB_TYPE STATIC)" in cmake
+    # Web keeps BUILD_TESTS meaningful; only APP/BENCHMARKS are forced off.
+    assert "EMSCRIPTEN AND (GAME_BUILD_APP OR GAME_BUILD_BENCHMARKS)" in cmake
+    tests_root = (root / "tests" / "CMakeLists.txt").read_text(encoding="utf-8")
+    assert "add_subdirectory(web)" in tests_root
+    src_root = (root / "src" / "CMakeLists.txt").read_text(encoding="utf-8")
+    assert "add_subdirectory(web)" in src_root
+    assert not (root / "android").exists()
+    assert not (root / "tests" / "ios").exists()
+    assert not (root / ".github").exists()
+
+
+def test_web_with_github_actions(tmp_root: Path) -> None:
+    opts = minimal_options("gameci", tmp_root, with_web_ci=True, with_github_actions=True)
+    generate_project(opts)
+    root = tmp_root / "gameci"
+    web_yml = (root / ".github" / "workflows" / "web.yml").read_text(encoding="utf-8")
+    assert "mymindstorm/setup-emsdk" in web_yml
+    assert "emcmake cmake" in web_yml
+    assert "gameci_web_test.html" in web_yml
+    assert "headless=new" in web_yml
+    release = (root / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+    assert "build-web:" in release
+    assert "needs: [prepare, build, build-web]" in release
+    assert "gameci-web-wasm32-release" in release
+
+
+def test_all_platforms_combined(tmp_root: Path) -> None:
+    opts = minimal_options(
+        "omni",
+        tmp_root,
+        with_android_ci=True,
+        with_ios_ci=True,
+        with_web_ci=True,
+        with_github_actions=True,
+    )
+    generate_project(opts)
+    root = tmp_root / "omni"
+    for wf in ("android.yml", "ios.yml", "web.yml"):
+        assert (root / ".github" / "workflows" / wf).is_file(), wf
+    release = (root / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+    assert "needs: [prepare, build, build-android, build-ios, build-web]" in release
+    cmake = (root / "CMakeLists.txt").read_text(encoding="utf-8")
+    assert "if(ANDROID OR IOS OR EMSCRIPTEN)" in cmake  # deps + static-core cond
+    assert "if(ANDROID OR IOS)" in cmake  # tests forced off on mobile only
+    assert "EMSCRIPTEN AND (OMNI_BUILD_APP OR OMNI_BUILD_BENCHMARKS)" in cmake
+
+
+def test_web_absent_by_default(tmp_root: Path) -> None:
+    opts = minimal_options("noweb", tmp_root, with_github_actions=True)
+    generate_project(opts)
+    root = tmp_root / "noweb"
+    assert not (root / "src" / "web").exists()
+    assert not (root / "tests" / "web").exists()
+    assert not (root / ".github" / "workflows" / "web.yml").exists()
+    release = (root / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+    assert "build-web" not in release
+    cmake = (root / "CMakeLists.txt").read_text(encoding="utf-8")
+    assert "EMSCRIPTEN" not in cmake
+
+
+def test_web_rejects_modules(tmp_root: Path) -> None:
+    opts = minimal_options("webmod", tmp_root, with_web_ci=True, with_modules=True)
+    with pytest.raises(ValueError, match="with-modules"):
+        generate_project(opts)
+    assert not (tmp_root / "webmod").exists()
+
+
+def test_web_with_shared_forces_static_core(tmp_root: Path) -> None:
+    opts = minimal_options("websh", tmp_root, with_web_ci=True, shared_library=True)
+    generate_project(opts)
+    cmake = (tmp_root / "websh" / "CMakeLists.txt").read_text(encoding="utf-8")
+    assert "set(WEBSH_CORE_LIB_TYPE SHARED)" in cmake
+    assert "set(WEBSH_CORE_LIB_TYPE STATIC)" in cmake
+
+
 def test_nonempty_destination_raises(tmp_root: Path) -> None:
     dest = tmp_root / "exists"
     dest.mkdir()

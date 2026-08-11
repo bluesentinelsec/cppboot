@@ -13,7 +13,7 @@ cd myproj && make && make test
 [![Python versions](https://img.shields.io/pypi/pyversions/cppboot.svg)](https://pypi.org/project/cppboot/)
 [![License](https://img.shields.io/pypi/l/cppboot.svg)](https://github.com/bluesentinelsec/cppboot/blob/main/LICENSE)
 
-**Documentation:** [bluesentinelsec.github.io/cppboot](https://bluesentinelsec.github.io/cppboot/) — including the [Android](https://bluesentinelsec.github.io/cppboot/android.html) (`--with-android-ci`) and [iOS](https://bluesentinelsec.github.io/cppboot/ios.html) (`--with-ios-ci`) package guides.
+**Documentation:** [bluesentinelsec.github.io/cppboot](https://bluesentinelsec.github.io/cppboot/) — including the [Android](https://bluesentinelsec.github.io/cppboot/android.html) (`--with-android-ci`), [iOS](https://bluesentinelsec.github.io/cppboot/ios.html) (`--with-ios-ci`), and [Web/Emscripten](https://bluesentinelsec.github.io/cppboot/web.html) (`--with-web-ci`) package guides.
 
 ---
 
@@ -81,7 +81,7 @@ Each project is ready for multi-platform development and release:
 | **Quality** | Microsoft `.clang-format`, Google C++ style for code, warnings-as-errors, `.clangd` |
 | **Docs** | Doxygen `Doxyfile`, `README.md`, `AGENTS.md` for humans and coding agents |
 | **IDE** | VS Code (clangd, CMake Tools, CodeLLDB, C++ TestMate), optional Vim + ctags |
-| **CI/CD** | GitHub Actions: multi-OS CI, sanitizers, tag/dispatch **Release** with zip assets; optional Android AAR CI (`--with-android-ci`) and iOS XCFramework CI (`--with-ios-ci`) |
+| **CI/CD** | GitHub Actions: multi-OS CI, sanitizers, tag/dispatch **Release** with zip assets; optional Android (`--with-android-ci`), iOS (`--with-ios-ci`), and Web/Emscripten (`--with-web-ci`) pipelines |
 | **Community** | `CODE_OF_CONDUCT.md`, `CONTRIBUTING.md`, `SECURITY.md` |
 | **Bootstrap** | `make fmt` then `git init` + initial commit (when tools are available) |
 
@@ -105,6 +105,7 @@ cppboot [-n NAME] [options]
 | `--with-modules` | off | C++20 modules layout |
 | `--with-android-ci` | off | Android Prefab AAR package: `android/` Gradle project, emulator device tests, Android CI + release jobs (not compatible with `--with-modules`) |
 | `--with-ios-ci` | off | iOS XCFramework package: build/verify scripts, Simulator package tests, iOS CI + release jobs (not compatible with `--with-modules`) |
+| `--with-web-ci` | off | Web/Emscripten package: HTML5 canvas game demo, browser tests in headless Chrome, web CI + release jobs (not compatible with `--with-modules`) |
 | `--shared` | off | Shared library instead of static |
 | `--github` | off | Create a public remote with `gh` and push |
 | `--output-dir` | `.` | Parent directory for the new project folder |
@@ -133,12 +134,16 @@ cppboot -n libdemo --shared --no-vscode
 cppboot -n moddemo --with-modules
 cppboot -n droidlib --with-android-ci
 cppboot -n applelib --with-ios-ci
+cppboot -n webgame --with-web-ci
+cppboot -n portable --with-android-ci --with-ios-ci --with-web-ci
 cppboot -n tool --github --output-dir ~/src
 ```
 
 **Android** (`--with-android-ci`): adds an `android/` Gradle project that packages the library as a [Prefab](https://google.github.io/prefab/) AAR (arm/x86_64 ABIs), a consumer test app with on-device native tests, and GitHub Actions jobs that build the AAR, verify its contents, and run the tests on an emulator. Releases attach `<name>-android-release-<version>.aar`. Local builds need JDK 17 + the Android SDK; Gradle fetches the pinned NDK and CMake automatically.
 
 **iOS** (`--with-ios-ci`): adds scripts that package the library as a static XCFramework (device arm64 + simulator arm64/x86_64, headers included), a Simulator test app consuming the package, and GitHub Actions jobs that build, verify, and test it. Releases attach `<name>-ios-xcframework-release-<version>.zip`. Local builds need macOS with Xcode command line tools.
+
+**Web** (`--with-web-ci`): adds a game-development-oriented Emscripten scaffold — an HTML5 canvas demo built around `emscripten_set_main_loop` with a custom fullscreen-canvas shell (plus commented hooks for `--preload-file` assets and SDL2), browser tests (GoogleTest compiled to wasm) run in headless Chrome, and GitHub Actions jobs for both. Releases attach `<name>-web-wasm32-release-<version>.zip` containing the wasm library, headers, and the playable demo. Local builds need an activated Emscripten SDK.
 
 ---
 

@@ -70,6 +70,20 @@ headers, version), then runs the native device tests on an Android emulator
 the same way and attaches `<app>-android-release-<version>.aar` to the
 GitHub Release alongside the zips.
 """
+        web_row = ""
+        web_ci_note = ""
+        if ctx.with_web_ci:
+            web_row = (
+                "\n| **Web** | `.github/workflows/web.yml` | "
+                "wasm library + canvas demo build + browser tests in headless Chrome |"
+            )
+            web_ci_note = """
+**Web** (`--with-web-ci`): builds the wasm32 static library, the HTML5 canvas
+demo, and the browser test page with Emscripten (Debug and Release), runs the
+tests in headless Chrome via `emrun`, and packages the installed library with
+the demo bundled. The Release workflow attaches
+`<app>-web-wasm32-release-<version>.zip` to the GitHub Release.
+"""
         ios_row = ""
         ios_ci_note = ""
         if ctx.with_ios_ci:
@@ -95,7 +109,7 @@ GitHub Actions workflows (default; disable with `cppboot --no-github-actions`):
 |----------|------|---------|
 | **CI** | `.github/workflows/ci.yml` | Ubuntu/macOS/Windows × Debug+Release, tests, benches, artifacts |
 | **Sanitizers** | `.github/workflows/sanitizers.yml` | Linux ASan+UBSan build + `ctest` (failures fail the job) |
-| **Release** | `.github/workflows/release.yml` | Tag `v*` or manual dispatch → notes + zip assets |{android_row}{ios_row}
+| **Release** | `.github/workflows/release.yml` | Tag `v*` or manual dispatch → notes + zip assets |{android_row}{ios_row}{web_row}
 
 **CI** (each OS):
 
@@ -126,7 +140,7 @@ prints after configure).
 `ASAN_OPTIONS` / `UBSAN_OPTIONS` set so findings abort (non-zero exit).
 
 Locally on Linux: `make sanitizer` (same flags and env).
-{android_ci_note}{ios_ci_note}
+{android_ci_note}{ios_ci_note}{web_ci_note}
 ### Creating a release
 
 The root **`VERSION`** file is the only place to bump the package version.
@@ -261,6 +275,53 @@ Notes:
 - Add project-specific package checks to `tests/ios/test_main.mm`; the
   host-side GoogleTest suite does not run on iOS.
 """
+    web_section = ""
+    if ctx.with_web_ci:
+        web_section = f"""
+
+## Web package (Emscripten / WebAssembly)
+
+The web scaffold (`cppboot --with-web-ci`) targets **browser game
+development**: `src/web/` holds an HTML5 canvas demo built around
+`emscripten_set_main_loop` (the browser drives frame pacing via
+requestAnimationFrame), rendering through an `EM_JS` canvas bridge, with a
+fullscreen-canvas shell page (`src/web/shell.html`).
+
+Build with the [Emscripten SDK](https://emscripten.org/docs/getting_started/downloads.html)
+activated (`emcmake` on PATH):
+
+```bash
+emcmake cmake -S . -B build/web-release -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build/web-release --parallel
+emrun build/web-release/bin/{ctx.name}.html   # serves + opens the demo
+```
+
+Grow it into a game:
+
+- Put per-frame simulation in `Update()` and rendering in the draw call —
+  swap the canvas-2D `EM_JS` bridge for WebGL2 (`-sUSE_WEBGL2=1` is already
+  linked) or SDL2 (`-sUSE_SDL=2`, see the commented block in
+  `src/web/CMakeLists.txt`).
+- Bundle assets into the virtual filesystem with `--preload-file
+  assets@/assets` (commented in `src/web/CMakeLists.txt`), then read them
+  with normal file I/O.
+- Never block the main thread; the browser owns the loop.
+
+Browser tests live in `tests/web/` (GoogleTest compiled to wasm) and run in
+headless Chrome:
+
+```bash
+emrun --browser=google-chrome \\
+  --browser_args="--headless=new --no-sandbox --disable-gpu" \\
+  --kill_exit --timeout 120 build/web-release/bin/{ctx.target}_web_test.html
+```
+
+The release package `{ctx.name}-web-wasm32-release-<version>.zip` contains
+the installed wasm32 static library + headers (consumable from any Emscripten
+CMake build via `find_package`), the playable demo under `demo/`, and the
+`EMSCRIPTEN_VERSION` it was built with. On the web the core library is always
+built **static** (even when the project was generated with `--shared`).
+"""
     vscode_section = ""
     if ctx.with_vscode:
         vscode_section = f"""
@@ -319,7 +380,7 @@ the build, test, and source-onboarding workflows — not product requirements.
 - **Ninja** is required when this project uses C++20 modules (`--with-modules`)
 - Optional tools: `clang-format`, `doxygen`, an LSP client with clangd
 - Network access on first configure (CMake **FetchContent** downloads pinned deps)
-{gha_section}{android_section}{ios_section}{codespaces_section}{vscode_section}
+{gha_section}{android_section}{ios_section}{web_section}{codespaces_section}{vscode_section}
 ## Preferred third-party libraries
 
 These are **imported by default** via FetchContent (see `cmake/Dependencies.cmake`)
@@ -626,6 +687,13 @@ def _agents_md(ctx: _Context) -> str:
   and `.github/workflows/ios.yml` builds + tests it in an iOS Simulator
   (`scripts/run_ios_tests.sh`); keep it green. iOS package tests live in
   `tests/ios/`, not the GoogleTest tree."""
+    web_bullet = ""
+    if ctx.with_web_ci:
+        web_bullet = """
+- If present, `src/web/` is the Emscripten canvas demo (game loop) and
+  `tests/web/` the browser test page; `.github/workflows/web.yml` builds both
+  and runs the tests in headless Chrome via `emrun`. Keep the game loop
+  non-blocking — the browser owns frame pacing."""
     return f"""\
 # AGENTS.md — working in `{ctx.name}`
 
@@ -693,7 +761,7 @@ Prefer the Makefile (Unix) or `build.bat` (Windows) wrappers:
 - If present, `.github/workflows/ci.yml` is the multi-OS CI contract (Debug +
   Release, tests, benchmarks on Linux/macOS/Windows). Keep it green.
 - If present, `.github/workflows/sanitizers.yml` runs ASan+UBSan on Linux;
-  treat sanitizer failures as bugs. Locally: `make sanitizer`.{android_bullet}{ios_bullet}
+  treat sanitizer failures as bugs. Locally: `make sanitizer`.{android_bullet}{ios_bullet}{web_bullet}
 - **Version:** edit the root **`VERSION`** file only. CMake generates
   `{ctx.namespace}::Version()` / CLI `--version` from `cmake/version.*.in`.
   Ship releases with annotated tags `vX.Y.Z` matching `VERSION` (or
