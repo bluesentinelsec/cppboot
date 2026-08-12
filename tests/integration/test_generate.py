@@ -391,6 +391,10 @@ def test_web_scaffold_files(tmp_root: Path) -> None:
     assert "emscripten_set_main_loop" in demo_cpp
     assert "<game/version.hpp>" in demo_cpp
     assert "EM_JS" in demo_cpp
+    # The EM_JS body is JavaScript; `make fmt` must not reformat it (clang-format
+    # splits `!==` into invalid `!= =`, breaking Release builds in acorn).
+    assert demo_cpp.index("// clang-format off") < demo_cpp.index("EM_JS(void,")
+    assert demo_cpp.index("// clang-format on") > demo_cpp.index("canvas.width !==")
     shell = (root / "src" / "web" / "shell.html").read_text(encoding="utf-8")
     assert "{{{ SCRIPT }}}" in shell
     assert 'id="canvas"' in shell
