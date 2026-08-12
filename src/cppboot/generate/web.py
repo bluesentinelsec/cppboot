@@ -140,6 +140,9 @@ def _web_demo_main_cpp(ctx: _Context) -> str:
 
 // Renders one frame through the canvas 2D context. EM_JS defines the function
 // once in JavaScript; calls from C++ are ordinary function calls.
+// clang-format off
+// The EM_JS body is JavaScript: clang-format must not touch it (it splits
+// JS operators like !== into invalid `!= =`).
 EM_JS(void, {ctx.target}_draw_frame, (double x, double y, double size, const char *hud), {{
     const canvas = document.getElementById('canvas');
     const dpr = window.devicePixelRatio || 1;
@@ -160,6 +163,7 @@ EM_JS(void, {ctx.target}_draw_frame, (double x, double y, double size, const cha
     g.font = (14 * dpr) + 'px monospace';
     g.fillText(UTF8ToString(hud), 12 * dpr, 24 * dpr);
 }});
+// clang-format on
 
 namespace
 {{
