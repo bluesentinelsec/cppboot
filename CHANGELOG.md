@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-08-12
+
+### Fixed
+
+- Generated web demo: the JavaScript body of the `EM_JS` renderer is now
+  wrapped in `clang-format off/on` markers. Previously `make fmt`
+  (default-on at bootstrap) reformatted it as C++, splitting `!==` into
+  invalid `!= =` and breaking Release Emscripten builds in the acorn
+  optimizer.
+
 ## [0.3.1] - 2026-08-11
 
 ### Added
