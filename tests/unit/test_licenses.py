@@ -21,6 +21,9 @@ from cppboot.licenses import (
         ("bsd", "bsd-3-clause"),
         ("gpl3", "gpl-3.0"),
         ("mpl2", "mpl-2.0"),
+        ("zlib", "zlib"),
+        ("Zlib", "zlib"),
+        ("zlib/libpng", "zlib"),
     ],
 )
 def test_normalize_license_id(raw: str, expected: str) -> None:
@@ -54,6 +57,16 @@ def test_offline_apache_has_body() -> None:
     result = fetch_license_text("apache-2.0", year="2026", holder="x", offline=True)
     assert "Apache License" in result.text
     assert result.source.startswith("offline-")
+
+
+def test_offline_zlib_has_full_body() -> None:
+    result = fetch_license_text("zlib", year="2026", holder="Acme Corp", offline=True)
+    assert result.license_id == "zlib"
+    assert result.source == "offline-fallback:zlib"
+    assert "zlib License" in result.text
+    assert "2026" in result.text
+    assert "Acme Corp" in result.text
+    assert "must not be misrepresented" in result.text
 
 
 def test_offline_gpl_uses_stub() -> None:

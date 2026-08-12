@@ -20,6 +20,7 @@ LICENSE_CHOICES = (
     "gpl-3.0",
     "lgpl-3.0",
     "mpl-2.0",
+    "zlib",
     "unlicense",
 )
 
@@ -35,6 +36,7 @@ _LICENSE_URLS: dict[str, str] = {
     "gpl-3.0": f"{_SPDX_BASE}/GPL-3.0-only.txt",
     "lgpl-3.0": f"{_SPDX_BASE}/LGPL-3.0-only.txt",
     "mpl-2.0": f"{_SPDX_BASE}/MPL-2.0.txt",
+    "zlib": f"{_SPDX_BASE}/Zlib.txt",
     "unlicense": f"{_SPDX_BASE}/Unlicense.txt",
 }
 
@@ -115,6 +117,29 @@ CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 """,
+    "zlib": """\
+zlib License
+
+Copyright (c) {year} {holder}
+
+This software is provided 'as-is', without any express or implied
+warranty. In no event will the authors be held liable for any damages
+arising from the use of this software.
+
+Permission is granted to anyone to use this software for any purpose,
+including commercial applications, and to alter it and redistribute it
+freely, subject to the following restrictions:
+
+1. The origin of this software must not be misrepresented; you must not
+   claim that you wrote the original software. If you use this software
+   in a product, an acknowledgment in the product documentation would be
+   appreciated but is not required.
+
+2. Altered source versions must be plainly marked as such, and must not be
+   misrepresented as being the original software.
+
+3. This notice may not be removed or altered from any source distribution.
+""",
     "unlicense": """\
 This is free and unencumbered software released into the public domain.
 
@@ -169,6 +194,7 @@ def normalize_license_id(value: str) -> str:
         "lgpl3": "lgpl-3.0",
         "mpl": "mpl-2.0",
         "mpl2": "mpl-2.0",
+        "zlib/libpng": "zlib",
     }
     key = aliases.get(key, key)
     if key not in _LICENSE_URLS:
