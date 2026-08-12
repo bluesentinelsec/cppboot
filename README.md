@@ -100,7 +100,7 @@ cppboot [-n NAME] [options]
 | Flag | Default | Description |
 |------|---------|-------------|
 | `-n`, `--name` | (prompt) | Project / program name |
-| `--license` | `apache-2.0` | `apache-2.0`, `mit`, `bsd-3-clause`, `gpl-3.0`, `lgpl-3.0`, `mpl-2.0`, `unlicense` |
+| `--license` | `apache-2.0` | `apache-2.0`, `mit`, `bsd-3-clause`, `gpl-3.0`, `lgpl-3.0`, `mpl-2.0`, `zlib`, `unlicense` |
 | `--build-system` | `cmake` | Only `cmake` is supported |
 | `--with-modules` | off | C++20 modules layout |
 | `--with-android-ci` | off | Android Prefab AAR package: `android/` Gradle project, emulator device tests, Android CI + release jobs (not compatible with `--with-modules`) |

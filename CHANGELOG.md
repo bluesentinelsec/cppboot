@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `--license zlib`: the zlib License (SPDX `Zlib`) is now a supported
+  license choice, with a full offline fallback body. `zlib/libpng` is
+  accepted as an alias.
+
 ## [0.3.0] - 2026-08-11
 
 ### Changed

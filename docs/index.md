@@ -55,7 +55,7 @@ Core opt-ins:
 | `--with-web-ci` | off | Web/Emscripten package + canvas game demo + CI ([guide](web.md)) |
 | `--shared` | off | Shared library instead of static |
 | `--github` | off | Create a public remote with `gh` and push |
-| `--license` | `apache-2.0` | `apache-2.0`, `mit`, `bsd-3-clause`, `gpl-3.0`, `lgpl-3.0`, `mpl-2.0`, `unlicense` |
+| `--license` | `apache-2.0` | `apache-2.0`, `mit`, `bsd-3-clause`, `gpl-3.0`, `lgpl-3.0`, `mpl-2.0`, `zlib`, `unlicense` |
 
 Opt-outs (features are **on** unless disabled): `--no-vim`, `--no-ctags`,
 `--no-vscode`, `--no-github-actions`, `--no-codespaces`, `--no-community-docs`,
