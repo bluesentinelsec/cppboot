@@ -42,6 +42,18 @@ def test_minimal_scaffold_files(tmp_root: Path) -> None:
     assert result.github_created is False
 
 
+def test_root_cmake_includes_are_embed_safe(tmp_root: Path) -> None:
+    """Module-name include() is shadowed by the embedding parent's
+    CMAKE_MODULE_PATH (observed in the wild: mog embedded via FetchContent
+    silently included the parent's Dependencies.cmake). Generated projects
+    must use absolute paths for their own cmake/ modules."""
+    result = generate_project(minimal_options("embedsafe", tmp_root))
+    cmake = (result.project_dir / "CMakeLists.txt").read_text(encoding="utf-8")
+    for module in ("CompilerWarnings", "Sanitizers", "Dependencies"):
+        assert f'include("${{CMAKE_CURRENT_SOURCE_DIR}}/cmake/{module}.cmake")' in cmake
+        assert f"include({module})" not in cmake
+
+
 def test_default_extras_written(tmp_root: Path) -> None:
     opts = minimal_options(
         "fullapp",

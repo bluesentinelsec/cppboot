@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Generated root `CMakeLists.txt` now includes its own `cmake/` modules by
+  absolute path. Module-name `include(Dependencies)` resolves against
+  `CMAKE_MODULE_PATH`, and when a generated project is embedded in another
+  (add_subdirectory / FetchContent) the parent's same-named module silently
+  shadows the child's — observed in the wild when mog's mbedTLS/miniz
+  declarations never ran while embedded.
+
+
 ## [0.3.2] - 2026-08-12
 
 ### Fixed
