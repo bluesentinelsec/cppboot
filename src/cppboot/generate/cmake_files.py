@@ -256,14 +256,18 @@ if({ctx.macro}_IS_TOP_LEVEL)
 endif()
 
 list(APPEND CMAKE_MODULE_PATH "${{CMAKE_CURRENT_SOURCE_DIR}}/cmake")
-include(CompilerWarnings)
-include(Sanitizers)
+# Absolute-path includes: module-name include() resolves against
+# CMAKE_MODULE_PATH, and when this project is embedded (add_subdirectory /
+# FetchContent) the PARENT project's cmake/ is searched first — a same-named
+# parent module would silently shadow ours.
+include("${{CMAKE_CURRENT_SOURCE_DIR}}/cmake/CompilerWarnings.cmake")
+include("${{CMAKE_CURRENT_SOURCE_DIR}}/cmake/Sanitizers.cmake")
 
 {options_block}
 # ASan + UBSan for project targets (intended for Linux GCC/Clang; see make sanitizer).
 option({ctx.macro}_ENABLE_SANITIZERS "Enable Address+UBSan on project targets" OFF)
 
-include(Dependencies)
+include("${{CMAKE_CURRENT_SOURCE_DIR}}/cmake/Dependencies.cmake")
 
 # Apply sanitizer flags only to targets created after this point (not FetchContent deps).
 if({ctx.macro}_ENABLE_SANITIZERS)
