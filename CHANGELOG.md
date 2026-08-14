@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-08-14
+
 ### Fixed
 - Generated root `CMakeLists.txt` now includes its own `cmake/` modules by
   absolute path. Module-name `include(Dependencies)` resolves against
